@@ -230,3 +230,7 @@ App profilləri Alloy-a push edəndə Alloy log-larında (pod `alloy`) request-l
 kubectl -n observability logs deploy/alloy --tail=200
 ```
 
+Memory allocation ucun
+
+PYROSCOPE_PROFILER_ALLOC=1m
+PYROSCOPE_ALLOC_LIVE=true-i yalnız leak şübhəsi olanda, qısa interval üçün aç.

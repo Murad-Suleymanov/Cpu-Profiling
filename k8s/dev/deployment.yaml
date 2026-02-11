@@ -99,10 +99,24 @@ spec:
             - name: http
               containerPort: 8080
           env:
+            - name: CLUSTER_NAME
+              value: docker-desktop
             - name: INJECT_JAVA
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.annotations['inject-java']
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
             # Applied only when INJECT_JAVA == "true"
             - name: JAVAAGENT_ARGS
               value: >-
@@ -126,8 +140,12 @@ spec:
             # Values (JFR): itimer | cpu | wall
             - name: PYROSCOPE_PROFILER_EVENT
               value: itimer
-            - name: PYROSCOPE_LABELS
-              value: cluster=docker-desktop,namespace=java-app-dev
+            # Allocation profiling (controls overhead): e.g. 512k, 1m, 2m...
+            - name: PYROSCOPE_PROFILER_ALLOC
+              value: 1m
+            # Keep only allocations that are still alive at the end of the profiling session.
+            - name: PYROSCOPE_ALLOC_LIVE
+              value: "true"
             # Optional: still allow extra flags via existing Dockerfile behavior
             - name: JAVA_OPTS
               value: ""
@@ -138,6 +156,13 @@ spec:
               set -eu
               if [ "${INJECT_JAVA:-}" = "true" ]; then
                 if [ -f /otel/opentelemetry-javaagent.jar ] && [ -f /pyroscope/pyroscope.jar ]; then
+                  # Add dynamic labels so all pods/namespaces are filterable in Grafana/Pyroscope.
+                  # If you set PYROSCOPE_LABELS manually, we just append pod metadata.
+                  if [ -n "${PYROSCOPE_LABELS:-}" ]; then
+                    export PYROSCOPE_LABELS="${PYROSCOPE_LABELS},cluster=${CLUSTER_NAME:-docker-desktop},namespace=${POD_NAMESPACE:-unknown},pod=${POD_NAME:-unknown},node=${NODE_NAME:-unknown}"
+                  else
+                    export PYROSCOPE_LABELS="cluster=${CLUSTER_NAME:-docker-desktop},namespace=${POD_NAMESPACE:-unknown},pod=${POD_NAME:-unknown},node=${NODE_NAME:-unknown}"
+                  fi
                   JAVA_OPTS="${JAVA_OPTS:-} ${JAVAAGENT_ARGS:-}"
                   export JAVA_OPTS
                   echo "inject-java=true; starting with javaagents."

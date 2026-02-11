@@ -12,7 +12,9 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 @CrossOrigin(origins = "*")
@@ -23,6 +25,7 @@ public class WorkloadController {
 
     // Helps prevent the JIT from optimizing our "custom marker" method away.
     private static volatile long CUSTOM_PROFILING_SINK = 0;
+    private static final List<byte[]> CUSTOM_ALLOC_RETAIN = new ArrayList<>();
 
     public WorkloadController(WorkloadService service) {
         this.service = service;
@@ -147,6 +150,71 @@ public class WorkloadController {
 
     private static long customProfilingMarkerRotateLeft(long v, int n) {
         return (v << n) | (v >>> (64 - n));
+    }
+
+    /**
+     * Allocation-heavy endpoint to make your app frames (com.example...) show up in
+     * allocation profiles (memory - alloc_*).
+     *
+     * Example:
+     *   GET /api/custom/alloc?mb=256&blockKb=64&retain=true
+     */
+    @GetMapping("/custom/alloc")
+    public ResponseEntity<?> customAlloc(
+            @RequestParam(name = "mb", required = false, defaultValue = "128") int mb,
+            @RequestParam(name = "blockKb", required = false, defaultValue = "64") int blockKb,
+            @RequestParam(name = "retain", required = false, defaultValue = "false") boolean retain
+    ) {
+        if (mb < 0 || blockKb <= 0) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(ErrorResponse.of("bad_request", "mb must be >= 0 and blockKb must be > 0"));
+        }
+
+        int blockBytes = blockKb * 1024;
+        long targetBytes = (long) mb * 1024L * 1024L;
+        long allocated = 0;
+        int blocks = 0;
+
+        while (allocated < targetBytes) {
+            byte[] b = new byte[blockBytes];
+            // touch memory so it isn't optimized away
+            b[0] = (byte) blocks;
+            CUSTOM_PROFILING_SINK += b[0];
+            allocated += b.length;
+            blocks++;
+
+            if (retain) {
+                synchronized (CUSTOM_ALLOC_RETAIN) {
+                    CUSTOM_ALLOC_RETAIN.add(b);
+                }
+            }
+        }
+
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("ok", true);
+        resp.put("mbRequested", mb);
+        resp.put("blockKb", blockKb);
+        resp.put("retain", retain);
+        resp.put("blocksAllocated", blocks);
+        resp.put("bytesAllocated", allocated);
+        resp.put("retainedBlocks", retainedBlocks());
+        return ResponseEntity.ok(resp);
+    }
+
+    @GetMapping("/custom/alloc/clear")
+    public ResponseEntity<?> customAllocClear() {
+        int cleared;
+        synchronized (CUSTOM_ALLOC_RETAIN) {
+            cleared = CUSTOM_ALLOC_RETAIN.size();
+            CUSTOM_ALLOC_RETAIN.clear();
+        }
+        return ResponseEntity.ok(Map.of("ok", true, "clearedBlocks", cleared));
+    }
+
+    private static int retainedBlocks() {
+        synchronized (CUSTOM_ALLOC_RETAIN) {
+            return CUSTOM_ALLOC_RETAIN.size();
+        }
     }
 
     public record StartRequest(
