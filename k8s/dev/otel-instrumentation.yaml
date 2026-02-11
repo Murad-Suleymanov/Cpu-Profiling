@@ -6,7 +6,8 @@ metadata:
 spec:
   exporter:
     # OpenTelemetryCollector service endpoint (OTLP gRPC).
-    endpoint: http://otel-collector.observability.svc.cluster.local:4317
+    # NOTE: OpenTelemetry Operator names the service "<cr-name>-collector" by default.
+    endpoint: http://otel-collector-collector.observability.svc.cluster.local:4317
   propagators:
     - tracecontext
     - baggage
