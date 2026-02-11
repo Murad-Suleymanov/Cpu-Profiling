@@ -28,11 +28,20 @@ spec:
       initContainers:
         - name: fetch-async-profiler
           image: curlimages/curl:8.12.1
+          env:
+            - name: INJECT_JAVA
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['inject-java']
           command:
             - sh
             - -lc
             - |
               set -euo pipefail
+              if [ "${INJECT_JAVA:-}" != "true" ]; then
+                echo "inject-java is not 'true'; skipping async-profiler download."
+                exit 0
+              fi
               echo "Downloading async-profiler v4.3 (linux-arm64)..."
               curl -fsSL -o /tmp/async-profiler.tar.gz \
                 https://github.com/async-profiler/async-profiler/releases/download/v4.3/async-profiler-4.3-linux-arm64.tar.gz
