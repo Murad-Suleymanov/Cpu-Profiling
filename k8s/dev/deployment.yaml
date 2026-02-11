@@ -126,12 +126,7 @@ spec:
             # Applied only when INJECT_JAVA == "true"
             - name: JAVAAGENT_ARGS
               value: >-
-                -javaagent:/otel/opentelemetry-javaagent.jar
                 -javaagent:/pyroscope/pyroscope.jar
-                -Dotel.service.name=workload-app
-                -Dotel.metrics.exporter=none
-                -Dotel.logs.exporter=none
-                -Dotel.traces.exporter=none
                 -XX:+UnlockDiagnosticVMOptions
                 -XX:+DebugNonSafepoints
                 -XX:+PreserveFramePointer
