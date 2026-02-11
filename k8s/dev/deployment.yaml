@@ -15,13 +15,15 @@ spec:
       labels:
         app: workload-app
       annotations:
-        inject-java: "true"
+        # OpenTelemetry Operator auto-instrumentation (Java).
+        # Requires: Instrumentation CR (`k8s/dev/otel-instrumentation.yaml`) and the operator installed.
+        instrumentation.opentelemetry.io/inject-java: "java-app-dev/java-instrumentation"
+        # Keep profiling toggle separate from OTel injection.
+        profiling.enabled: "true"
     spec:
       shareProcessNamespace: true
       volumes:
         - name: tools
-          emptyDir: {}
-        - name: otel
           emptyDir: {}
         - name: pyroscope
           emptyDir: {}
@@ -29,17 +31,17 @@ spec:
         - name: fetch-async-profiler
           image: curlimages/curl:8.12.1
           env:
-            - name: INJECT_JAVA
+            - name: PROFILING_ENABLED
               valueFrom:
                 fieldRef:
-                  fieldPath: metadata.annotations['inject-java']
+                  fieldPath: metadata.annotations['profiling.enabled']
           command:
             - sh
             - -lc
             - |
               set -euo pipefail
-              if [ "${INJECT_JAVA:-}" != "true" ]; then
-                echo "inject-java is not 'true'; skipping async-profiler download."
+              if [ "${PROFILING_ENABLED:-}" != "true" ]; then
+                echo "profiling.enabled is not 'true'; skipping async-profiler download."
                 exit 0
               fi
               echo "Downloading async-profiler v4.3 (linux-arm64)..."
@@ -51,43 +53,20 @@ spec:
           volumeMounts:
             - name: tools
               mountPath: /opt/async-profiler
-        - name: fetch-otel-javaagent
-          image: curlimages/curl:8.12.1
-          env:
-            - name: INJECT_JAVA
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.annotations['inject-java']
-          command:
-            - sh
-            - -lc
-            - |
-              set -euo pipefail
-              if [ "${INJECT_JAVA:-}" != "true" ]; then
-                echo "inject-java is not 'true'; skipping OpenTelemetry Java agent download."
-                exit 0
-              fi
-              echo "Downloading OpenTelemetry Java agent (latest)..."
-              curl -fsSL -o /otel/opentelemetry-javaagent.jar \
-                https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/latest/download/opentelemetry-javaagent.jar
-              ls -lh /otel/opentelemetry-javaagent.jar
-          volumeMounts:
-            - name: otel
-              mountPath: /otel
         - name: fetch-pyroscope-javaagent
           image: curlimages/curl:8.12.1
           env:
-            - name: INJECT_JAVA
+            - name: PROFILING_ENABLED
               valueFrom:
                 fieldRef:
-                  fieldPath: metadata.annotations['inject-java']
+                  fieldPath: metadata.annotations['profiling.enabled']
           command:
             - sh
             - -lc
             - |
               set -euo pipefail
-              if [ "${INJECT_JAVA:-}" != "true" ]; then
-                echo "inject-java is not 'true'; skipping Pyroscope Java agent download."
+              if [ "${PROFILING_ENABLED:-}" != "true" ]; then
+                echo "profiling.enabled is not 'true'; skipping Pyroscope Java agent download."
                 exit 0
               fi
               echo "Downloading Pyroscope Java agent (v2.3.0)..."
@@ -107,10 +86,10 @@ spec:
           env:
             - name: CLUSTER_NAME
               value: docker-desktop
-            - name: INJECT_JAVA
+            - name: PROFILING_ENABLED
               valueFrom:
                 fieldRef:
-                  fieldPath: metadata.annotations['inject-java']
+                  fieldPath: metadata.annotations['profiling.enabled']
             - name: POD_NAME
               valueFrom:
                 fieldRef:
@@ -123,7 +102,7 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
-            # Applied only when INJECT_JAVA == "true"
+            # Applied only when PROFILING_ENABLED == "true"
             - name: JAVAAGENT_ARGS
               value: >-
                 -javaagent:/pyroscope/pyroscope.jar
@@ -155,8 +134,8 @@ spec:
             - -lc
             - |
               set -eu
-              if [ "${INJECT_JAVA:-}" = "true" ]; then
-                if [ -f /otel/opentelemetry-javaagent.jar ] && [ -f /pyroscope/pyroscope.jar ]; then
+              if [ "${PROFILING_ENABLED:-}" = "true" ]; then
+                if [ -f /pyroscope/pyroscope.jar ]; then
                   # Add dynamic labels so all pods/namespaces are filterable in Grafana/Pyroscope.
                   # If you set PYROSCOPE_LABELS manually, we just append pod metadata.
                   if [ -n "${PYROSCOPE_LABELS:-}" ]; then
@@ -166,19 +145,17 @@ spec:
                   fi
                   JAVA_OPTS="${JAVA_OPTS:-} ${JAVAAGENT_ARGS:-}"
                   export JAVA_OPTS
-                  echo "inject-java=true; starting with javaagents."
+                  echo "profiling.enabled=true; starting with profiling javaagent."
                 else
-                  echo "inject-java=true but agent jar(s) missing; starting without javaagents."
+                  echo "profiling.enabled=true but pyroscope.jar missing; starting without profiling javaagent."
                 fi
               else
-                echo "inject-java!=true; starting without javaagents."
+                echo "profiling.enabled!=true; starting without profiling javaagent."
               fi
               exec java ${JAVA_OPTS:-} -jar /app/app.jar
           volumeMounts:
             - name: tools
               mountPath: /opt/async-profiler
-            - name: otel
-              mountPath: /otel
             - name: pyroscope
               mountPath: /pyroscope
           # For async-profiler attach in stricter clusters you may need extra permissions.

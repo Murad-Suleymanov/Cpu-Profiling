@@ -94,13 +94,29 @@ GC davranışını daha “sərt” görmək üçün retained/churn parametrlər
 
 Qeyd: workload log-ları default olaraq stdout-a yazılır; `reportEverySec: 0` göndərsəniz periodik report söndürülür.
 
-## Docker Desktop Kubernetes (dev) + inject-java + async-profiler
+## Docker Desktop Kubernetes (dev) + OpenTelemetry Operator + profiling (Pyroscope) + async-profiler
 
 Bu repo-da `k8s/dev/` altında Docker Desktop Kubernetes üçün dev manifestlər var:
 
 - `k8s/dev/namespace.yaml`
-- `k8s/dev/deployment.yaml` (içində `inject-java: "true"` annotasiyası və `JAVA_TOOL_OPTIONS` ilə OpenTelemetry javaagent)
+- `k8s/dev/otel-instrumentation.yaml` (OpenTelemetry Operator üçün `Instrumentation` CR)
+- `k8s/dev/deployment.yaml`
+  - OpenTelemetry Operator injection: `instrumentation.opentelemetry.io/inject-java: "java-app-dev/java-instrumentation"`
+  - Profiling toggle: `profiling.enabled: "true"` (Pyroscope javaagent)
 - `k8s/dev/service.yaml`
+
+### OpenTelemetry Operator install (cluster)
+
+Qeyd: OpenTelemetry Operator adətən **cert-manager** tələb edir. Cluster-də cert-manager yoxdursa, əvvəlcə onu quraşdırın.
+
+Operator-u Helm ilə:
+
+```bash
+helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
+helm repo update
+helm upgrade --install opentelemetry-operator open-telemetry/opentelemetry-operator \
+  --namespace opentelemetry-operator-system --create-namespace
+```
 
 ### Build image (lokal)
 
@@ -111,7 +127,11 @@ docker build -t workload-app:dev .
 ### Deploy
 
 ```bash
+kubectl apply -f k8s/observability/namespace.yaml
+kubectl apply -f k8s/observability/otel-collector.yaml
+
 kubectl apply -f k8s/dev/namespace.yaml
+kubectl apply -f k8s/dev/otel-instrumentation.yaml
 kubectl apply -f k8s/dev/deployment.yaml
 kubectl apply -f k8s/dev/service.yaml
 ```
@@ -169,7 +189,13 @@ open ./profile.html
 
 ### inject-java (OpenTelemetry) söndürmək
 
-`k8s/dev/deployment.yaml` içində `JAVA_TOOL_OPTIONS`-dan `-javaagent:/otel/opentelemetry-javaagent.jar` hissəsini çıxartmaq kifayətdir.
+`k8s/dev/deployment.yaml` içində pod template annotasiyasını silin:
+
+- `instrumentation.opentelemetry.io/inject-java`
+
+Profiling-i söndürmək üçün isə:
+
+- `profiling.enabled: "false"`
 
 ## Grafana + Alloy + Pyroscope (continuous profiling)
 
@@ -180,6 +206,7 @@ Alloy isə profilləri **Pyroscope** server-ə forward edir. Vizualizasiya üç�
 
 ```bash
 kubectl apply -f k8s/observability/namespace.yaml
+kubectl apply -f k8s/observability/otel-collector.yaml
 kubectl apply -f k8s/observability/pyroscope.yaml
 kubectl apply -f k8s/observability/alloy.yaml
 kubectl apply -f k8s/observability/grafana.yaml
