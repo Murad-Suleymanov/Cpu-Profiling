@@ -1,0 +1,94 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alloy-config
+  namespace: observability
+data:
+  config.river: |
+    // Receive profiles from Pyroscope SDKs / agents and forward to Pyroscope.
+    //
+    // Docs:
+    // - https://grafana.com/docs/pyroscope/latest/configure-client/grafana-alloy/receive_profiles/
+
+    pyroscope.write "backend" {
+      endpoint {
+        url = "http://pyroscope.observability.svc.cluster.local:4040"
+      }
+    }
+
+    pyroscope.receive_http "default" {
+      http {
+        listen_address = "0.0.0.0"
+        listen_port = 9999
+      }
+
+      forward_to = [pyroscope.write.backend.receiver]
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alloy
+  namespace: observability
+  labels:
+    app: alloy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: alloy
+  template:
+    metadata:
+      labels:
+        app: alloy
+    spec:
+      containers:
+        - name: alloy
+          image: grafana/alloy:v1.13.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - /etc/alloy/config.river
+            - --server.http.listen-addr=0.0.0.0:12345
+          ports:
+            - name: http
+              containerPort: 12345
+            - name: profiles
+              containerPort: 9999
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alloy
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: 12345
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /-/ready
+              port: 12345
+            initialDelaySeconds: 15
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: alloy-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alloy
+  namespace: observability
+spec:
+  type: ClusterIP
+  selector:
+    app: alloy
+  ports:
+    - name: http
+      port: 12345
+      targetPort: 12345
+    - name: profiles
+      port: 9999
+      targetPort: 9999
+

@@ -1,0 +1,43 @@
+# Java / Maven
+target/
+!.mvn/wrapper/maven-wrapper.jar
+**/dependency-reduced-pom.xml
+
+# Gradle (in case used later)
+.gradle/
+build/
+
+# IntelliJ / IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+
+# VS Code
+.vscode/
+
+# Eclipse
+.project
+.classpath
+.settings/
+
+# macOS / OS junk
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Env / secrets (if you add any)
+.env
+.env.*
+
+# Profiling / diagnostics artifacts
+*.hprof
+*.hprof.gz
+profile.*
+profiles/
+_debug_*/
+_debug_*.jar
+

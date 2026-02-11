@@ -1,0 +1,164 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: workload-app
+  namespace: java-app-dev
+  labels:
+    app: workload-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: workload-app
+  template:
+    metadata:
+      labels:
+        app: workload-app
+      annotations:
+        inject-java: "true"
+    spec:
+      # Needed only if you want a profiler sidecar to see the Java PID.
+      # For "exec into app container and run asprof 1", it's not required,
+      # but leaving it enabled is useful for future sidecars/debug.
+      shareProcessNamespace: true
+      volumes:
+        - name: tools
+          emptyDir: {}
+        - name: otel
+          emptyDir: {}
+        - name: pyroscope
+          emptyDir: {}
+      initContainers:
+        - name: fetch-async-profiler
+          image: curlimages/curl:8.12.1
+          command:
+            - sh
+            - -lc
+            - |
+              set -euo pipefail
+              echo "Downloading async-profiler v4.3 (linux-arm64)..."
+              curl -fsSL -o /tmp/async-profiler.tar.gz \
+                https://github.com/async-profiler/async-profiler/releases/download/v4.3/async-profiler-4.3-linux-arm64.tar.gz
+              mkdir -p /opt/async-profiler
+              tar -xzf /tmp/async-profiler.tar.gz -C /opt/async-profiler --strip-components=1
+              /opt/async-profiler/bin/asprof --version
+          volumeMounts:
+            - name: tools
+              mountPath: /opt/async-profiler
+        - name: fetch-otel-javaagent
+          image: curlimages/curl:8.12.1
+          env:
+            - name: INJECT_JAVA
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['inject-java']
+          command:
+            - sh
+            - -lc
+            - |
+              set -euo pipefail
+              if [ "${INJECT_JAVA:-}" != "true" ]; then
+                echo "inject-java is not 'true'; skipping OpenTelemetry Java agent download."
+                exit 0
+              fi
+              echo "Downloading OpenTelemetry Java agent (latest)..."
+              curl -fsSL -o /otel/opentelemetry-javaagent.jar \
+                https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/latest/download/opentelemetry-javaagent.jar
+              ls -lh /otel/opentelemetry-javaagent.jar
+          volumeMounts:
+            - name: otel
+              mountPath: /otel
+        - name: fetch-pyroscope-javaagent
+          image: curlimages/curl:8.12.1
+          env:
+            - name: INJECT_JAVA
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['inject-java']
+          command:
+            - sh
+            - -lc
+            - |
+              set -euo pipefail
+              if [ "${INJECT_JAVA:-}" != "true" ]; then
+                echo "inject-java is not 'true'; skipping Pyroscope Java agent download."
+                exit 0
+              fi
+              echo "Downloading Pyroscope Java agent (v2.3.0)..."
+              curl -fsSL -o /pyroscope/pyroscope.jar \
+                https://github.com/grafana/pyroscope-java/releases/download/v2.3.0/pyroscope.jar
+              ls -lh /pyroscope/pyroscope.jar
+          volumeMounts:
+            - name: pyroscope
+              mountPath: /pyroscope
+      containers:
+        - name: app
+          image: workload-app:dev
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: INJECT_JAVA
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.annotations['inject-java']
+            # Applied only when INJECT_JAVA == "true"
+            - name: JAVAAGENT_ARGS
+              value: >-
+                -javaagent:/otel/opentelemetry-javaagent.jar
+                -javaagent:/pyroscope/pyroscope.jar
+                -Dotel.service.name=workload-app
+                -Dotel.metrics.exporter=none
+                -Dotel.logs.exporter=none
+                -Dotel.traces.exporter=none
+                -XX:+UnlockDiagnosticVMOptions
+                -XX:+DebugNonSafepoints
+                -XX:+PreserveFramePointer
+                -XX:MaxInlineLevel=0
+                -XX:-Inline
+            - name: PYROSCOPE_APPLICATION_NAME
+              value: workload-app
+            # Send profiles to Alloy, Alloy forwards to Pyroscope
+            - name: PYROSCOPE_SERVER_ADDRESS
+              value: http://alloy.observability.svc.cluster.local:9999
+            # Wall-clock profiling: shows time spent sleeping/waiting/blocking.
+            # Values (JFR): itimer | cpu | wall
+            - name: PYROSCOPE_PROFILER_EVENT
+              value: itimer
+            - name: PYROSCOPE_LABELS
+              value: cluster=docker-desktop,namespace=java-app-dev
+            # Optional: still allow extra flags via existing Dockerfile behavior
+            - name: JAVA_OPTS
+              value: ""
+          command:
+            - sh
+            - -lc
+            - |
+              set -eu
+              if [ "${INJECT_JAVA:-}" = "true" ]; then
+                if [ -f /otel/opentelemetry-javaagent.jar ] && [ -f /pyroscope/pyroscope.jar ]; then
+                  JAVA_OPTS="${JAVA_OPTS:-} ${JAVAAGENT_ARGS:-}"
+                  export JAVA_OPTS
+                  echo "inject-java=true; starting with javaagents."
+                else
+                  echo "inject-java=true but agent jar(s) missing; starting without javaagents."
+                fi
+              else
+                echo "inject-java!=true; starting without javaagents."
+              fi
+              exec java ${JAVA_OPTS:-} -jar /app/app.jar
+          volumeMounts:
+            - name: tools
+              mountPath: /opt/async-profiler
+            - name: otel
+              mountPath: /otel
+            - name: pyroscope
+              mountPath: /pyroscope
+          # For async-profiler attach in stricter clusters you may need extra permissions.
+          # Docker Desktop usually works without, but keep this handy:
+          # securityContext:
+          #   allowPrivilegeEscalation: true
+          #   capabilities:
+          #     add: ["SYS_PTRACE", "PERFMON"]
+
