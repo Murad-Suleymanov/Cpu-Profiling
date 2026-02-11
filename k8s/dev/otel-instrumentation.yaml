@@ -20,6 +20,24 @@ spec:
       value: grpc
     - name: OTEL_EXPORTER_OTLP_INSECURE
       value: "true"
+    # Optional: explicit endpoints (useful if you later split signals).
+    - name: OTEL_EXPORTER_OTLP_ENDPOINT
+      value: http://otel-collector-collector.observability.svc.cluster.local:4317
+    - name: OTEL_EXPORTER_OTLP_METRICS_ENDPOINT
+      value: http://otel-collector-collector.observability.svc.cluster.local:4317
     # Optional but explicit; helps when multiple apps exist.
     - name: OTEL_SERVICE_NAME
       value: workload-app
+    # Match your desired "quiet" agent behavior.
+    - name: OTEL_LOGS_EXPORTER
+      value: "none"
+    - name: OTEL_JAVAAGENT_LOGGING
+      value: "none"
+    # Histogram preference (optional).
+    - name: OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION
+      value: "BASE2_EXPONENTIAL_BUCKET_HISTOGRAM"
+    # Resource providers & semantic conventions (optional).
+    - name: OTEL_JAVA_ENABLED_RESOURCE_PROVIDERS
+      value: "io.opentelemetry.instrumentation.resources.AttributeResourceProvider,io.opentelemetry.instrumentation.resources.ContainerResourceProvider"
+    - name: OTEL_SEMCONV_STABILITY_OPT_IN
+      value: "database"

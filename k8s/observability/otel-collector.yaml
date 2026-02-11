@@ -5,6 +5,16 @@ metadata:
   namespace: observability
 spec:
   mode: deployment
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      protocol: TCP
+    - name: otlp-http
+      port: 4318
+      protocol: TCP
+    - name: prometheus
+      port: 8889
+      protocol: TCP
   config:
     receivers:
       otlp:
@@ -24,6 +34,8 @@ spec:
     exporters:
       debug:
         verbosity: detailed
+      prometheus:
+        endpoint: 0.0.0.0:8889
 
     service:
       pipelines:
@@ -34,7 +46,7 @@ spec:
         metrics:
           receivers: [otlp]
           processors: [memory_limiter, batch]
-          exporters: [debug]
+          exporters: [debug, prometheus]
         logs:
           receivers: [otlp]
           processors: [memory_limiter, batch]

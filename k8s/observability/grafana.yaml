@@ -19,6 +19,13 @@ data:
         editable: true
         jsonData:
           backendType: pyroscope
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        uid: prometheus
+        url: http://prometheus.observability.svc.cluster.local:9090
+        isDefault: false
+        editable: true
 ---
 apiVersion: apps/v1
 kind: Deployment
