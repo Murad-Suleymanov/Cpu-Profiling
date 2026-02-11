@@ -17,9 +17,6 @@ spec:
       annotations:
         inject-java: "true"
     spec:
-      # Needed only if you want a profiler sidecar to see the Java PID.
-      # For "exec into app container and run asprof 1", it's not required,
-      # but leaving it enabled is useful for future sidecars/debug.
       shareProcessNamespace: true
       volumes:
         - name: tools
