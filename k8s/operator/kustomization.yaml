@@ -1,0 +1,10 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Pinned versions (2026-02):
+# - cert-manager v1.19.3
+# - opentelemetry-operator v0.106.0
+resources:
+  - https://github.com/cert-manager/cert-manager/releases/download/v1.19.3/cert-manager.yaml
+  - https://github.com/open-telemetry/opentelemetry-operator/releases/download/v0.106.0/opentelemetry-operator.yaml
+

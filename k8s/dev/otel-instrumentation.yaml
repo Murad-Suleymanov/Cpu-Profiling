@@ -1,43 +1,34 @@
 apiVersion: opentelemetry.io/v1alpha1
 kind: Instrumentation
 metadata:
-  name: java-instrumentation
+  name: otel-auto-instrumentation
   namespace: java-app-dev
 spec:
   exporter:
-    # OpenTelemetryCollector service endpoint (OTLP gRPC).
-    # NOTE: OpenTelemetry Operator names the service "<cr-name>-collector" by default.
-    endpoint: http://otel-collector-collector.observability.svc.cluster.local:4317
+    endpoint: http://alloy.observability.svc.cluster.local:4317
+  env:
+    - name: OTEL_EXPORTER_OTLP_PROTOCOL
+      value: "grpc"
+    # Plaintext OTLP gRPC (no TLS) for in-cluster collector endpoint.
+    - name: OTEL_EXPORTER_OTLP_INSECURE
+      value: "true"
   propagators:
     - tracecontext
     - baggage
   sampler:
     type: parentbased_traceidratio
-    argument: "1.0"
-  env:
-    # Ensure OTLP is sent over gRPC to :4317.
-    - name: OTEL_EXPORTER_OTLP_PROTOCOL
-      value: grpc
-    - name: OTEL_EXPORTER_OTLP_INSECURE
-      value: "true"
-    # Optional: explicit endpoints (useful if you later split signals).
-    - name: OTEL_EXPORTER_OTLP_ENDPOINT
-      value: http://otel-collector-collector.observability.svc.cluster.local:4317
-    - name: OTEL_EXPORTER_OTLP_METRICS_ENDPOINT
-      value: http://otel-collector-collector.observability.svc.cluster.local:4317
-    # Optional but explicit; helps when multiple apps exist.
-    - name: OTEL_SERVICE_NAME
-      value: workload-app
-    # Match your desired "quiet" agent behavior.
-    - name: OTEL_LOGS_EXPORTER
-      value: "none"
-    - name: OTEL_JAVAAGENT_LOGGING
-      value: "none"
-    # Histogram preference (optional).
-    - name: OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION
-      value: "BASE2_EXPONENTIAL_BUCKET_HISTOGRAM"
-    # Resource providers & semantic conventions (optional).
-    - name: OTEL_JAVA_ENABLED_RESOURCE_PROVIDERS
-      value: "io.opentelemetry.instrumentation.resources.AttributeResourceProvider,io.opentelemetry.instrumentation.resources.ContainerResourceProvider"
-    - name: OTEL_SEMCONV_STABILITY_OPT_IN
-      value: "database"
+    argument: "1"
+  java:
+    env:
+      - name: OTEL_LOGS_EXPORTER
+        value: "none"
+      - name: OTEL_TRACES_EXPORTER
+        value: "none"
+      - name: OTEL_JAVAAGENT_LOGGING
+        value: "none"
+      - name: OTEL_EXPORTER_OTLP_METRICS_DEFAULT_HISTOGRAM_AGGREGATION
+        value: "BASE2_EXPONENTIAL_BUCKET_HISTOGRAM"
+      - name: OTEL_JAVA_ENABLED_RESOURCE_PROVIDERS
+        value: "io.opentelemetry.instrumentation.resources.AttributeResourceProvider,io.opentelemetry.instrumentation.resources.ContainerResourceProvider"
+      - name: OTEL_SEMCONV_STABILITY_OPT_IN
+        value: "database,jvm"

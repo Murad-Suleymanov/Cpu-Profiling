@@ -24,6 +24,42 @@ data:
 
       forward_to = [pyroscope.write.backend.receiver]
     }
+
+    // Receive OTLP metrics directly from OpenTelemetry Java auto-instrumentation
+    // and expose them for Prometheus scraping (no otel-collector needed).
+    otelcol.receiver.otlp "default" {
+      grpc {
+        endpoint = "0.0.0.0:4317"
+      }
+      http {
+        endpoint = "0.0.0.0:4318"
+      }
+
+      output {
+        metrics = [otelcol.processor.batch.default.input]
+      }
+    }
+
+    otelcol.processor.batch "default" {
+      output {
+        metrics = [otelcol.exporter.prometheus.default.input]
+      }
+    }
+
+    // Convert OTLP metrics to Prometheus format and remote-write to Prometheus.
+    // Disable automatic unit suffixes (_bytes, _total, _ratio) so metric names
+    // match the Micrometer/Spring Boot convention used in production
+    // (e.g. jvm_memory_used instead of jvm_memory_used_bytes).
+    otelcol.exporter.prometheus "default" {
+      add_metric_suffixes = false
+      forward_to = [prometheus.remote_write.default.receiver]
+    }
+
+    prometheus.remote_write "default" {
+      endpoint {
+        url = "http://prometheus.observability.svc.cluster.local:9090/api/v1/write"
+      }
+    }
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -55,6 +91,10 @@ spec:
               containerPort: 12345
             - name: profiles
               containerPort: 9999
+            - name: otlp-grpc
+              containerPort: 4317
+            - name: otlp-http
+              containerPort: 4318
           volumeMounts:
             - name: config
               mountPath: /etc/alloy
@@ -91,4 +131,10 @@ spec:
     - name: profiles
       port: 9999
       targetPort: 9999
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
 

@@ -17,7 +17,7 @@ spec:
       annotations:
         # OpenTelemetry Operator auto-instrumentation (Java).
         # Requires: Instrumentation CR (`k8s/dev/otel-instrumentation.yaml`) and the operator installed.
-        instrumentation.opentelemetry.io/inject-java: "java-app-dev/java-instrumentation"
+        instrumentation.opentelemetry.io/inject-java: "true"
         # Keep profiling toggle separate from OTel injection.
         profiling.enabled: "true"
     spec:

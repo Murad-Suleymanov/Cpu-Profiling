@@ -109,7 +109,20 @@ Bu repo-da `k8s/dev/` altında Docker Desktop Kubernetes üçün dev manifestlə
 
 Qeyd: OpenTelemetry Operator adətən **cert-manager** tələb edir. Cluster-də cert-manager yoxdursa, əvvəlcə onu quraşdırın.
 
-Operator-u Helm ilə:
+#### Variant A: Plain YAML (pinned)
+
+Bu repo-da Helm-siz variant da var:
+
+```bash
+kubectl apply -k k8s/operator
+```
+
+Pində olan versiyalar:
+
+- cert-manager `v1.19.3`
+- opentelemetry-operator `v0.144.0`
+
+#### Variant B: Helm
 
 ```bash
 helm repo add open-telemetry https://open-telemetry.github.io/opentelemetry-helm-charts
