@@ -1,6 +1,7 @@
 package com.example.workload.api;
 
 import com.example.workload.engine.WorkloadEngine;
+import com.example.workload.service.DeepProfilingService;
 import com.example.workload.service.WorkloadService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -22,13 +23,15 @@ import java.util.Map;
 @RequestMapping("/api")
 public class WorkloadController {
     private final WorkloadService service;
+    private final DeepProfilingService deepService;
 
     // Helps prevent the JIT from optimizing our "custom marker" method away.
     private static volatile long CUSTOM_PROFILING_SINK = 0;
     private static final List<byte[]> CUSTOM_ALLOC_RETAIN = new ArrayList<>();
 
-    public WorkloadController(WorkloadService service) {
+    public WorkloadController(WorkloadService service, DeepProfilingService deepService) {
         this.service = service;
+        this.deepService = deepService;
     }
 
     @GetMapping("/health")
@@ -64,6 +67,40 @@ public class WorkloadController {
         } catch (IllegalStateException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ErrorResponse.of("not_found", e.getMessage()));
         }
+    }
+
+    /**
+     * Deep-nested CPU profiling endpoint.
+     * Shows a realistic call tree with distinct CPU cost per method in flamegraphs.
+     *
+     * Example:
+     *   GET /api/deep/process?durationMs=5000
+     *
+     * Call tree:
+     *   processOrder()
+     *    ├── validateInput()     ~10%  (parsePayload + checkConstraints)
+     *    ├── enrichData()        ~20%  (lookupCache + computeScore → heavyScoreCalc)
+     *    ├── transform()         ~30%  (serializeToBytes + compressPayload → deflateBytes)
+     *    └── persist()           ~40%  (buildIndex → sortEntries + writeToStore → checksumVerify)
+     */
+    @GetMapping("/deep/process")
+    public ResponseEntity<?> deepProcess(
+            @RequestParam(name = "durationMs", required = false, defaultValue = "5000") long durationMs,
+            @RequestParam(name = "seed", required = false, defaultValue = "42") long seed
+    ) {
+        if (durationMs < 100 || durationMs > 60_000) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(ErrorResponse.of("bad_request", "durationMs must be between 100 and 60000"));
+        }
+
+        Map<String, Object> timings = deepService.processOrder(durationMs, seed);
+
+        Map<String, Object> resp = new LinkedHashMap<>();
+        resp.put("ok", true);
+        resp.put("durationMsRequested", durationMs);
+        resp.put("seed", seed);
+        resp.putAll(timings);
+        return ResponseEntity.ok(resp);
     }
 
     /**
