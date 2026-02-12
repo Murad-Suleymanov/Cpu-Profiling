@@ -274,3 +274,15 @@ Memory allocation ucun
 
 PYROSCOPE_PROFILER_ALLOC=1m
 PYROSCOPE_ALLOC_LIVE=true-i yalnız leak şübhəsi olanda, qısa interval üçün aç.
+
+Dump cixarmaq ucun
+
+kubectl -n java-app-dev get pods -l app=workload-app -o jsonpath='{.items[0].metadata.name}' - pod name-i al
+
+kubectl -n java-app-dev exec workload-app-5f9969546c-25gzl -c app -- jcmd 1 GC.heap_dump /tmp/heapdump.hprof 2>&1 - tapdigin pod name-i bura at
+
+# Pod-da heap dump yarat
+kubectl -n java-app-dev exec <pod> -c app -- /opt/async-profiler/bin/asprof jcmd 34 "GC.heap_dump /tmp/heapdump.hprof"
+
+# Lokala kopyala
+kubectl -n java-app-dev cp <pod>:/tmp/heapdump.hprof dump/heapdump.hprof -c app
