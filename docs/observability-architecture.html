@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Observability Stack Architecture</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0f1117;
+    color: #e1e4e8;
+    font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+    display: flex;
+    justify-content: center;
+    padding: 40px 20px;
+    min-height: 100vh;
+  }
+  .canvas {
+    width: 1100px;
+  }
+  h1 {
+    text-align: center;
+    font-size: 22px;
+    font-weight: 600;
+    color: #c9d1d9;
+    margin-bottom: 32px;
+    letter-spacing: 0.5px;
+  }
+
+  /* ── namespace boxes ── */
+  .ns {
+    border: 1.5px solid;
+    border-radius: 14px;
+    padding: 24px 22px 22px;
+    position: relative;
+    margin-bottom: 0;
+  }
+  .ns-label {
+    position: absolute;
+    top: -11px;
+    left: 22px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    padding: 2px 10px;
+    border-radius: 6px;
+  }
+  .ns-app {
+    border-color: #2d6a4f;
+    background: rgba(45,106,79,0.07);
+  }
+  .ns-app .ns-label {
+    background: #2d6a4f;
+    color: #b7e4c7;
+  }
+  .ns-obs {
+    border-color: #3a506b;
+    background: rgba(58,80,107,0.07);
+  }
+  .ns-obs .ns-label {
+    background: #3a506b;
+    color: #a8c5e2;
+  }
+
+  /* ── pod box ── */
+  .pod {
+    border: 1.5px dashed #484f58;
+    border-radius: 10px;
+    padding: 18px 16px 14px;
+    position: relative;
+    margin-top: 6px;
+  }
+  .pod-label {
+    position: absolute;
+    top: -10px;
+    left: 16px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.8px;
+    background: #21262d;
+    color: #8b949e;
+    padding: 2px 8px;
+    border-radius: 4px;
+    border: 1px solid #484f58;
+  }
+
+  /* ── cards ── */
+  .card {
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 12px;
+    line-height: 1.45;
+    display: inline-flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+  .card-title {
+    font-weight: 700;
+    font-size: 13px;
+    margin-bottom: 2px;
+  }
+  .card-sub {
+    font-size: 10.5px;
+    opacity: 0.7;
+  }
+
+  .card-init   { background: #1c2333; border: 1px solid #30363d; color: #8b949e; }
+  .card-agent  { border: 1px solid; }
+  .card-otel   { background: rgba(56,132,244,0.12); border-color: #3884f4; color: #79b8ff; }
+  .card-pyro-agent { background: rgba(229,115,26,0.12); border-color: #e5731a; color: #ffb86c; }
+
+  .card-alloy  { background: rgba(130,80,223,0.10); border: 1.5px solid #8250df; color: #d2a8ff; }
+  .card-prom   { background: rgba(229,57,53,0.10); border: 1.5px solid #e53935; color: #ff8a80; }
+  .card-pyro   { background: rgba(229,115,26,0.10); border: 1.5px solid #e5731a; color: #ffb86c; }
+  .card-grafana{ background: rgba(255,152,0,0.10); border: 1.5px solid #ff9800; color: #ffe0b2; }
+
+  .card-step   { background: #161b22; border: 1px solid #30363d; color: #8b949e; font-size: 11px; }
+
+  /* ── flex helpers ── */
+  .row   { display: flex; gap: 12px; align-items: stretch; }
+  .col   { display: flex; flex-direction: column; gap: 10px; }
+  .grow  { flex: 1; }
+  .center{ justify-content: center; align-items: center; }
+  .wrap  { flex-wrap: wrap; }
+
+  /* ── arrows (SVG overlay) ── */
+  .arrows-section {
+    position: relative;
+    height: 70px;
+    margin: 0;
+  }
+  .arrow-label {
+    position: absolute;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    padding: 2px 8px;
+    border-radius: 4px;
+  }
+  .arrow-label-otel {
+    left: 200px;
+    top: 24px;
+    background: rgba(56,132,244,0.15);
+    color: #79b8ff;
+  }
+  .arrow-label-pyro {
+    right: 200px;
+    top: 24px;
+    background: rgba(229,115,26,0.15);
+    color: #ffb86c;
+  }
+
+  svg.arrows {
+    width: 100%;
+    height: 100%;
+    position: absolute;
+    top: 0;
+    left: 0;
+  }
+
+  /* ── inner arrows ── */
+  .inner-arrows {
+    position: relative;
+    height: 44px;
+  }
+
+  /* ── section gaps ── */
+  .gap-sm { height: 10px; }
+  .gap-md { height: 18px; }
+
+  /* ── alloy inner layout ── */
+  .alloy-inner {
+    display: flex;
+    gap: 20px;
+    margin-top: 10px;
+  }
+  .alloy-pipeline {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: center;
+  }
+  .alloy-pipeline .card-step {
+    width: 100%;
+    text-align: center;
+    padding: 7px 10px;
+  }
+  .pipe-arrow {
+    color: #484f58;
+    font-size: 16px;
+    line-height: 1;
+  }
+
+  /* ── bottom row ── */
+  .bottom-row {
+    display: flex;
+    gap: 16px;
+    margin-top: 14px;
+  }
+  .bottom-row > * {
+    flex: 1;
+  }
+
+  /* ── grafana full-width ── */
+  .grafana-box {
+    margin-top: 14px;
+  }
+  .grafana-box .card {
+    width: 100%;
+    text-align: center;
+  }
+  .ds-list {
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+    margin-top: 6px;
+    font-size: 10.5px;
+  }
+  .ds-item {
+    padding: 4px 12px;
+    border-radius: 5px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid #30363d;
+  }
+  .ds-item span { opacity: 0.6; }
+
+  /* ── vertical connector ── */
+  .v-connector {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 0;
+    font-size: 10px;
+    color: #484f58;
+  }
+  .v-connector .v-line {
+    width: 1.5px;
+    height: 18px;
+    background: #484f58;
+  }
+  .v-connector .v-arrow {
+    font-size: 14px;
+  }
+
+  /* ── connector between namespaces ── */
+  .ns-connector {
+    display: flex;
+    justify-content: space-around;
+    padding: 0 60px;
+    height: 64px;
+    position: relative;
+  }
+  .ns-conn-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+  }
+  .ns-conn-line {
+    width: 2px;
+    height: 22px;
+  }
+  .ns-conn-line.blue { background: #3884f4; }
+  .ns-conn-line.orange { background: #e5731a; }
+  .ns-conn-label {
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.4px;
+    padding: 3px 10px;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+  .ns-conn-label.blue { background: rgba(56,132,244,0.15); color: #79b8ff; }
+  .ns-conn-label.orange { background: rgba(229,115,26,0.15); color: #ffb86c; }
+  .ns-conn-arrow {
+    font-size: 12px;
+    line-height: 1;
+  }
+  .ns-conn-arrow.blue { color: #3884f4; }
+  .ns-conn-arrow.orange { color: #e5731a; }
+
+  /* datasource connectors */
+  .ds-connectors {
+    display: flex;
+    justify-content: space-around;
+    padding: 0 60px;
+    height: 36px;
+  }
+  .ds-conn-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .ds-conn-line {
+    width: 1.5px;
+    height: 14px;
+  }
+  .ds-conn-line.red { background: #e53935; }
+  .ds-conn-line.org { background: #e5731a; }
+  .ds-conn-arrow { font-size: 11px; line-height: 1; }
+  .ds-conn-arrow.red { color: #e53935; }
+  .ds-conn-arrow.org { color: #e5731a; }
+  .ds-conn-label {
+    font-size: 8.5px;
+    color: #6e7681;
+    letter-spacing: 0.3px;
+  }
+
+  /* ── operator badge ── */
+  .operator-badge {
+    position: absolute;
+    top: -28px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: #161b22;
+    border: 1px solid #3884f4;
+    border-radius: 6px;
+    padding: 3px 12px;
+    font-size: 9.5px;
+    font-weight: 600;
+    color: #79b8ff;
+    letter-spacing: 0.4px;
+    white-space: nowrap;
+  }
+  .operator-badge::after {
+    content: '';
+    position: absolute;
+    bottom: -8px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 8px solid #3884f4;
+  }
+
+  .container-row {
+    display: flex;
+    gap: 12px;
+    margin-top: 8px;
+  }
+  .jvm-box {
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 14px 14px 10px;
+    flex: 1;
+    position: relative;
+    background: rgba(255,255,255,0.02);
+  }
+  .jvm-label {
+    position: absolute;
+    top: -9px;
+    left: 12px;
+    font-size: 9.5px;
+    font-weight: 600;
+    background: #161b22;
+    color: #6e7681;
+    padding: 1px 7px;
+    border-radius: 3px;
+    border: 1px solid #30363d;
+    letter-spacing: 0.5px;
+  }
+  .agents-row {
+    display: flex;
+    gap: 10px;
+    margin-top: 4px;
+  }
+  .agents-row .card {
+    flex: 1;
+  }
+</style>
+</head>
+<body>
+
+<div class="canvas">
+  <h1>Observability Stack Architecture</h1>
+
+  <!-- ════════════ NAMESPACE: java-app-dev ════════════ -->
+  <div class="ns ns-app" style="position:relative;">
+    <div class="ns-label">namespace: java-app-dev</div>
+
+    <div class="pod" style="position:relative; margin-top:32px;">
+      <div class="pod-label">workload-app Pod</div>
+
+      <div class="operator-badge">OTel Operator &nbsp;auto-injects Java Agent</div>
+
+      <!-- init containers -->
+      <div class="row" style="margin-top: 14px;">
+        <div class="card card-init grow">
+          <div class="card-title">initContainer</div>
+          <div class="card-sub">fetch-async-profiler</div>
+          <div class="card-sub" style="opacity:0.5;">async-profiler v4.3 &rarr; /opt/async-profiler</div>
+        </div>
+        <div class="card card-init grow">
+          <div class="card-title">initContainer</div>
+          <div class="card-sub">fetch-pyroscope-javaagent</div>
+          <div class="card-sub" style="opacity:0.5;">pyroscope.jar v2.3.0 &rarr; /pyroscope</div>
+        </div>
+      </div>
+
+      <!-- JVM container -->
+      <div class="container-row">
+        <div class="jvm-box">
+          <div class="jvm-label">app container &mdash; JVM :8080</div>
+          <div class="agents-row">
+            <div class="card card-agent card-otel">
+              <div class="card-title">OTel Java Agent</div>
+              <div class="card-sub">auto-injected by Operator</div>
+              <div class="card-sub" style="margin-top:3px;">Signals: <strong>metrics only</strong></div>
+              <div class="card-sub">traces=none, logs=none</div>
+            </div>
+            <div class="card card-agent card-pyro-agent">
+              <div class="card-title">Pyroscope Java Agent</div>
+              <div class="card-sub">-javaagent:/pyroscope/pyroscope.jar</div>
+              <div class="card-sub" style="margin-top:3px;">CPU (itimer) + Alloc (1m)</div>
+              <div class="card-sub">labels: cluster, ns, pod, node</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════ CONNECTORS BETWEEN NAMESPACES ════════════ -->
+  <div class="ns-connector">
+    <div class="ns-conn-item">
+      <div class="ns-conn-line blue"></div>
+      <div class="ns-conn-label blue">OTLP / gRPC :4317 &nbsp;(metrics)</div>
+      <div class="ns-conn-arrow blue">&#9660;</div>
+      <div class="ns-conn-line blue"></div>
+    </div>
+    <div class="ns-conn-item">
+      <div class="ns-conn-line orange"></div>
+      <div class="ns-conn-label orange">HTTP :9999 &nbsp;(profiling data)</div>
+      <div class="ns-conn-arrow orange">&#9660;</div>
+      <div class="ns-conn-line orange"></div>
+    </div>
+  </div>
+
+  <!-- ════════════ NAMESPACE: observability ════════════ -->
+  <div class="ns ns-obs">
+    <div class="ns-label">namespace: observability</div>
+
+    <!-- Alloy -->
+    <div style="margin-top:8px;">
+      <div class="card card-alloy" style="width:100%; display:flex; flex-direction:column;">
+        <div class="card-title" style="font-size:15px; text-align:center;">Grafana Alloy</div>
+        <div class="card-sub" style="text-align:center;">Mərkəzi telemetry pipeline &mdash; collector + proxy</div>
+
+        <div class="alloy-inner">
+          <!-- LEFT pipeline: metrics -->
+          <div class="alloy-pipeline">
+            <div class="card-step"><strong>otelcol.receiver.otlp</strong><br><span style="opacity:0.6">gRPC :4317 &nbsp;/&nbsp; HTTP :4318</span></div>
+            <div class="pipe-arrow">&#9660;</div>
+            <div class="card-step"><strong>otelcol.processor.batch</strong></div>
+            <div class="pipe-arrow">&#9660;</div>
+            <div class="card-step"><strong>otelcol.exporter.prometheus</strong><br><span style="opacity:0.6">OTLP &rarr; Prometheus format</span></div>
+            <div class="pipe-arrow">&#9660;</div>
+            <div class="card-step"><strong>prometheus.remote_write</strong><br><span style="opacity:0.6">&rarr; prometheus:9090/api/v1/write</span></div>
+          </div>
+
+          <!-- divider -->
+          <div style="width:1px; background:#30363d; margin: 8px 0;"></div>
+
+          <!-- RIGHT pipeline: profiles -->
+          <div class="alloy-pipeline">
+            <div class="card-step"><strong>pyroscope.receive_http</strong><br><span style="opacity:0.6">HTTP :9999</span></div>
+            <div class="pipe-arrow">&#9660;</div>
+            <div class="card-step"><strong>pyroscope.write "backend"</strong><br><span style="opacity:0.6">&rarr; pyroscope:4040</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- connectors to backends -->
+    <div class="ds-connectors">
+      <div class="ds-conn-item">
+        <div class="ds-conn-line red"></div>
+        <div class="ds-conn-label">remote_write</div>
+        <div class="ds-conn-arrow red">&#9660;</div>
+        <div class="ds-conn-line red"></div>
+      </div>
+      <div class="ds-conn-item">
+        <div class="ds-conn-line org"></div>
+        <div class="ds-conn-label">HTTP push</div>
+        <div class="ds-conn-arrow org">&#9660;</div>
+        <div class="ds-conn-line org"></div>
+      </div>
+    </div>
+
+    <!-- Prometheus + Pyroscope -->
+    <div class="bottom-row">
+      <div class="card card-prom" style="text-align:center;">
+        <div class="card-title" style="font-size:14px;">Prometheus</div>
+        <div class="card-sub">:9090 &nbsp;&mdash;&nbsp; Metrics TSDB</div>
+        <div class="card-sub" style="margin-top:3px;">remote_write receiver enabled</div>
+      </div>
+      <div class="card card-pyro" style="text-align:center;">
+        <div class="card-title" style="font-size:14px;">Pyroscope</div>
+        <div class="card-sub">:4040 &nbsp;&mdash;&nbsp; Continuous Profiling</div>
+        <div class="card-sub" style="margin-top:3px;">flame graphs &amp; allocation profiles</div>
+      </div>
+    </div>
+
+    <!-- connectors to grafana -->
+    <div class="ds-connectors">
+      <div class="ds-conn-item">
+        <div class="ds-conn-line red"></div>
+        <div class="ds-conn-label">datasource (query)</div>
+        <div class="ds-conn-arrow red">&#9660;</div>
+        <div class="ds-conn-line red"></div>
+      </div>
+      <div class="ds-conn-item">
+        <div class="ds-conn-line org"></div>
+        <div class="ds-conn-label">datasource (query)</div>
+        <div class="ds-conn-arrow org">&#9660;</div>
+        <div class="ds-conn-line org"></div>
+      </div>
+    </div>
+
+    <!-- Grafana -->
+    <div class="grafana-box">
+      <div class="card card-grafana" style="width:100%; text-align:center;">
+        <div class="card-title" style="font-size:15px;">Grafana</div>
+        <div class="card-sub">:3000 &nbsp;&mdash;&nbsp; Visualization &amp; Dashboards</div>
+        <div class="ds-list">
+          <div class="ds-item">
+            <strong style="color:#ff8a80;">Prometheus</strong>
+            <span>&nbsp;&rarr;&nbsp;prometheus.observability:9090</span>
+          </div>
+          <div class="ds-item">
+            <strong style="color:#ffb86c;">Pyroscope</strong>
+            <span>&nbsp;&rarr;&nbsp;pyroscope.observability:4040</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+</body>
+</html>
