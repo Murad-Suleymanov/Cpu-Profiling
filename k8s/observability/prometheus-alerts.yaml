@@ -1052,7 +1052,9 @@ data:
         rules:
           - alert: PVCPending
             expr: |
-              kube_persistentvolumeclaim_status_phase{phase="Pending"} == 1
+              (kube_persistentvolumeclaim_status_phase{phase="Pending"} == 1)
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
             for: 15m
             labels:
               severity: warning
@@ -1065,7 +1067,9 @@ data:
 
           - alert: PVCLost
             expr: |
-              kube_persistentvolumeclaim_status_phase{phase="Lost"} == 1
+              (kube_persistentvolumeclaim_status_phase{phase="Lost"} == 1)
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
             for: 1m
             labels:
               severity: critical
@@ -1079,10 +1083,14 @@ data:
           - alert: PVFillingUp
             expr: |
               (
-                kubelet_volume_stats_used_bytes
-                /
-                kubelet_volume_stats_capacity_bytes
-              ) > 0.85
+                (
+                  kubelet_volume_stats_used_bytes
+                  /
+                  kubelet_volume_stats_capacity_bytes
+                ) > 0.85
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
             for: 10m
             labels:
               severity: warning
@@ -1096,10 +1104,14 @@ data:
           - alert: PVFillingUpCritical
             expr: |
               (
-                kubelet_volume_stats_used_bytes
-                /
-                kubelet_volume_stats_capacity_bytes
-              ) > 0.95
+                (
+                  kubelet_volume_stats_used_bytes
+                  /
+                  kubelet_volume_stats_capacity_bytes
+                ) > 0.95
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
             for: 5m
             labels:
               severity: critical
@@ -1112,10 +1124,14 @@ data:
           - alert: PVInodeFillingUp
             expr: |
               (
-                kubelet_volume_stats_inodes_used
-                /
-                kubelet_volume_stats_inodes
-              ) > 0.9
+                (
+                  kubelet_volume_stats_inodes_used
+                  /
+                  kubelet_volume_stats_inodes
+                ) > 0.9
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
             for: 10m
             labels:
               severity: warning
@@ -1133,9 +1149,13 @@ data:
         rules:
           - alert: HPAMaxedOut
             expr: |
-              kube_horizontalpodautoscaler_status_current_replicas
-              ==
-              kube_horizontalpodautoscaler_spec_max_replicas
+              (
+                kube_horizontalpodautoscaler_status_current_replicas
+                ==
+                kube_horizontalpodautoscaler_spec_max_replicas
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
             for: 15m
             labels:
               severity: warning
@@ -1148,11 +1168,15 @@ data:
 
           - alert: HPAScaleDown
             expr: |
-              kube_horizontalpodautoscaler_status_current_replicas
-              ==
-              kube_horizontalpodautoscaler_spec_min_replicas
-              and
-              kube_horizontalpodautoscaler_spec_min_replicas > 1
+              (
+                kube_horizontalpodautoscaler_status_current_replicas
+                ==
+                kube_horizontalpodautoscaler_spec_min_replicas
+                and
+                kube_horizontalpodautoscaler_spec_min_replicas > 1
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
             for: 1h
             labels:
               severity: info
@@ -1165,9 +1189,13 @@ data:
 
           - alert: HPADesiredReplicasMismatch
             expr: |
-              kube_horizontalpodautoscaler_status_desired_replicas
-              !=
-              kube_horizontalpodautoscaler_status_current_replicas
+              (
+                kube_horizontalpodautoscaler_status_desired_replicas
+                !=
+                kube_horizontalpodautoscaler_status_current_replicas
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
             for: 15m
             labels:
               severity: warning
@@ -1185,8 +1213,12 @@ data:
         rules:
           - alert: ServiceWithNoEndpoints
             expr: |
-              kube_endpoint_address_available == 0
-              and on(endpoint, namespace) kube_service_info
+              (
+                kube_endpoint_address_available == 0
+                and on(endpoint, namespace) kube_service_info
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
             for: 10m
             labels:
               severity: warning
@@ -1199,11 +1231,15 @@ data:
 
           - alert: EndpointNotReadyRatio
             expr: |
-              kube_endpoint_address_not_ready
-              /
-              (kube_endpoint_address_available + kube_endpoint_address_not_ready)
-              > 0.5
-              and (kube_endpoint_address_available + kube_endpoint_address_not_ready) > 0
+              (
+                kube_endpoint_address_not_ready
+                /
+                (kube_endpoint_address_available + kube_endpoint_address_not_ready)
+                > 0.5
+                and (kube_endpoint_address_available + kube_endpoint_address_not_ready) > 0
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
             for: 10m
             labels:
               severity: warning
@@ -1216,9 +1252,13 @@ data:
           - alert: IngressTLSCertExpiringSoon
             expr: |
               (
-                kube_secret_created{type="kubernetes.io/tls"}
-                + 90 * 24 * 3600
-              ) < time()
+                (
+                  kube_secret_created{type="kubernetes.io/tls"}
+                  + 90 * 24 * 3600
+                ) < time()
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
             for: 1h
             labels:
               severity: info
@@ -1236,10 +1276,14 @@ data:
         rules:
           - alert: ResourceQuotaCPUNearLimit
             expr: |
-              kube_resourcequota{type="used", resource="requests.cpu"}
-              /
-              kube_resourcequota{type="hard", resource="requests.cpu"}
-              > 0.9
+              (
+                kube_resourcequota{type="used", resource="requests.cpu"}
+                / ignoring(type)
+                kube_resourcequota{type="hard", resource="requests.cpu"}
+                > 0.9
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
             for: 10m
             labels:
               severity: warning
@@ -1252,10 +1296,14 @@ data:
 
           - alert: ResourceQuotaMemoryNearLimit
             expr: |
-              kube_resourcequota{type="used", resource="requests.memory"}
-              /
-              kube_resourcequota{type="hard", resource="requests.memory"}
-              > 0.9
+              (
+                kube_resourcequota{type="used", resource="requests.memory"}
+                / ignoring(type)
+                kube_resourcequota{type="hard", resource="requests.memory"}
+                > 0.9
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
             for: 10m
             labels:
               severity: warning
@@ -1267,10 +1315,14 @@ data:
 
           - alert: ResourceQuotaPodCountNearLimit
             expr: |
-              kube_resourcequota{type="used", resource="pods"}
-              /
-              kube_resourcequota{type="hard", resource="pods"}
-              > 0.9
+              (
+                kube_resourcequota{type="used", resource="pods"}
+                / ignoring(type)
+                kube_resourcequota{type="hard", resource="pods"}
+                > 0.9
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
             for: 10m
             labels:
               severity: warning
