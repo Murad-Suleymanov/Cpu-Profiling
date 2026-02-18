@@ -1,0 +1,177 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-config
+  namespace: observability
+data:
+  alertmanager.yml: |
+    global:
+      resolve_timeout: 5m
+
+    # ──────────────────────────────────────────────────────────────
+    # Route Tree
+    # Default: group alerts by namespace + alertname, send to "default".
+    # Add child routes to send specific namespaces / severities to
+    # different receivers (e.g. Slack, PagerDuty, email).
+    # ──────────────────────────────────────────────────────────────
+    route:
+      receiver: "default"
+      group_by: ["namespace", "alertname"]
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+
+      routes:
+        # Critical alerts → shorter repeat interval.
+        - matchers:
+            - severity="critical"
+          receiver: "critical"
+          repeat_interval: 1h
+          continue: false
+
+        # Example: route specific namespace to a team channel.
+        # Uncomment and modify as needed.
+        # - matchers:
+        #     - namespace="java-app-dev"
+        #   receiver: "java-app-team"
+        #   continue: false
+
+    # ──────────────────────────────────────────────────────────────
+    # Inhibition Rules
+    # If a critical alert fires, suppress the matching warning.
+    # ──────────────────────────────────────────────────────────────
+    inhibit_rules:
+      - source_matchers:
+          - severity="critical"
+        target_matchers:
+          - severity="warning"
+        equal: ["namespace", "alertname"]
+
+    # ──────────────────────────────────────────────────────────────
+    # Receivers
+    # Configure your notification channels below.
+    # ──────────────────────────────────────────────────────────────
+    receivers:
+      # Default receiver: logs to Alertmanager UI only.
+      - name: "default"
+        # webhook_configs:
+        #   - url: "http://your-webhook-endpoint:5001/"
+
+      # Critical receiver: configure real notification channel here.
+      - name: "critical"
+        # ── Slack example ──
+        # slack_configs:
+        #   - api_url: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
+        #     channel: "#alerts-critical"
+        #     title: '{{ template "slack.default.title" . }}'
+        #     text: >-
+        #       {{ range .Alerts }}
+        #       *Alert:* {{ .Labels.alertname }}
+        #       *Severity:* {{ .Labels.severity }}
+        #       *Namespace:* {{ .Labels.namespace }}
+        #       *Pod:* {{ .Labels.pod }}
+        #       *Summary:* {{ .Annotations.summary }}
+        #       *Description:* {{ .Annotations.description }}
+        #       {{ end }}
+        #     send_resolved: true
+
+        # ── Email example ──
+        # email_configs:
+        #   - to: "oncall-team@example.com"
+        #     from: "alertmanager@example.com"
+        #     smarthost: "smtp.example.com:587"
+        #     auth_username: "alertmanager@example.com"
+        #     auth_password: "your-smtp-password"
+        #     send_resolved: true
+
+        # ── Telegram example ──
+        # telegram_configs:
+        #   - bot_token: "YOUR_BOT_TOKEN"
+        #     chat_id: -1001234567890
+        #     parse_mode: "HTML"
+        #     send_resolved: true
+
+        # ── PagerDuty example ──
+        # pagerduty_configs:
+        #   - service_key: "your-pagerduty-service-key"
+        #     send_resolved: true
+
+      # Example: team-specific receiver.
+      # - name: "java-app-team"
+      #   slack_configs:
+      #     - api_url: "https://hooks.slack.com/services/YOUR/TEAM/WEBHOOK"
+      #       channel: "#java-app-alerts"
+      #       send_resolved: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alertmanager
+  namespace: observability
+  labels:
+    app: alertmanager
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: alertmanager
+  template:
+    metadata:
+      labels:
+        app: alertmanager
+    spec:
+      containers:
+        - name: alertmanager
+          image: prom/alertmanager:v0.27.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - "--config.file=/etc/alertmanager/alertmanager.yml"
+            - "--storage.path=/alertmanager"
+            - "--web.listen-address=:9093"
+            - "--cluster.listen-address="
+          ports:
+            - name: http
+              containerPort: 9093
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alertmanager
+            - name: data
+              mountPath: /alertmanager
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: 9093
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 9093
+            initialDelaySeconds: 10
+            periodSeconds: 15
+      volumes:
+        - name: config
+          configMap:
+            name: alertmanager-config
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alertmanager
+  namespace: observability
+spec:
+  type: ClusterIP
+  selector:
+    app: alertmanager
+  ports:
+    - name: http
+      port: 9093
+      targetPort: 9093

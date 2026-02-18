@@ -1,0 +1,3599 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-alerts
+  namespace: observability
+data:
+  pod-alerts.yml: |
+    groups:
+      # ================================================================
+      #  1. POD HEALTH
+      # ================================================================
+      - name: pod-health
+        rules:
+          - alert: PodCrashLoopBackOff
+            expr: |
+              (
+                max_over_time(
+                  kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"}[5m]
+                ) >= 1
+              )
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "[{{ $labels.team }}/{{ $labels.squad }}] Pod {{ $labels.namespace }}/{{ $labels.pod }} CrashLoopBackOff-dadır"
+              description: >-
+                Container {{ $labels.container }} in pod
+                {{ $labels.namespace }}/{{ $labels.pod }}
+                has been in CrashLoopBackOff for more than 5 minutes.
+                Team: {{ $labels.team }}, Squad: {{ $labels.squad }},
+                Tribe: {{ $labels.tribe }}, Env: {{ $labels.environment }},
+                Cluster: {{ $labels.cluster }}.
+              runbook_url: "https://runbooks.prometheus-operator.dev/runbooks/kubernetes/kubepodcrashlooping"
+
+          - alert: PodNotReady
+            expr: |
+              (
+                min_over_time(
+                  kube_pod_status_ready{condition="true"}[5m]
+                ) == 0
+              )
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[{{ $labels.team }}/{{ $labels.squad }}] Pod {{ $labels.namespace }}/{{ $labels.pod }} ready deyil"
+              description: >-
+                Pod {{ $labels.namespace }}/{{ $labels.pod }}
+                has been in a non-ready state for more than 5 minutes.
+                Team: {{ $labels.team }}, Env: {{ $labels.environment }}.
+
+          - alert: PodFrequentRestarts
+            expr: |
+              (
+                increase(
+                  kube_pod_container_status_restarts_total[1h]
+                ) > 5
+              )
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 0m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[{{ $labels.team }}/{{ $labels.squad }}] Pod {{ $labels.namespace }}/{{ $labels.pod }} tez-tez restart olur"
+              description: >-
+                Container {{ $labels.container }} in pod
+                {{ $labels.namespace }}/{{ $labels.pod }}
+                has restarted {{ $value | printf "%.0f" }} times in the last hour.
+                Team: {{ $labels.team }}, Env: {{ $labels.environment }}.
+
+          - alert: PodPending
+            expr: |
+              (
+                kube_pod_status_phase{phase="Pending"} == 1
+              )
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[{{ $labels.team }}/{{ $labels.squad }}] Pod {{ $labels.namespace }}/{{ $labels.pod }} Pending vəziyyətdədir"
+              description: >-
+                Pod {{ $labels.namespace }}/{{ $labels.pod }}
+                has been in Pending state for more than 15 minutes.
+                Team: {{ $labels.team }}, Env: {{ $labels.environment }}.
+                Check events: kubectl describe pod {{ $labels.pod }} -n {{ $labels.namespace }}
+
+          - alert: PodFailed
+            expr: |
+              (
+                kube_pod_status_phase{phase="Failed"} == 1
+              )
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              summary: "[{{ $labels.team }}/{{ $labels.squad }}] Pod {{ $labels.namespace }}/{{ $labels.pod }} Failed vəziyyətdədir"
+              description: >-
+                Pod {{ $labels.namespace }}/{{ $labels.pod }}
+                is in Failed phase.
+                Team: {{ $labels.team }}, Env: {{ $labels.environment }}.
+
+          - alert: PodUnknown
+            expr: |
+              (
+                kube_pod_status_phase{phase="Unknown"} == 1
+              )
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[{{ $labels.team }}/{{ $labels.squad }}] Pod {{ $labels.namespace }}/{{ $labels.pod }} Unknown vəziyyətdədir"
+              description: >-
+                Pod {{ $labels.namespace }}/{{ $labels.pod }}
+                is in Unknown phase for more than 5 minutes.
+                Team: {{ $labels.team }}, Env: {{ $labels.environment }}.
+
+          - alert: ContainerOOMKilled
+            expr: |
+              (
+                kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
+              )
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 0m
+            labels:
+              severity: critical
+            annotations:
+              summary: "[{{ $labels.team }}/{{ $labels.squad }}] Container {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} OOMKilled olub"
+              description: >-
+                Container {{ $labels.container }} in pod
+                {{ $labels.namespace }}/{{ $labels.pod }}
+                was OOMKilled. Consider increasing memory limits.
+                Team: {{ $labels.team }}, Env: {{ $labels.environment }}.
+
+          - alert: ContainerTerminatedWithError
+            expr: |
+              (
+                kube_pod_container_status_last_terminated_reason{reason!="Completed", reason!="OOMKilled"} == 1
+                and on(namespace, pod, container)
+                increase(kube_pod_container_status_restarts_total[30m]) > 0
+              )
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 0m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[{{ $labels.team }}/{{ $labels.squad }}] Container {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} xəta ilə dayandı"
+              description: >-
+                Container {{ $labels.container }} in pod
+                {{ $labels.namespace }}/{{ $labels.pod }}
+                terminated with reason: {{ $labels.reason }} (son 30 dəqiqədə restart olub).
+                Team: {{ $labels.team }}, Env: {{ $labels.environment }}.
+
+          - alert: PodImagePullBackOff
+            expr: |
+              (
+                max_over_time(
+                  kube_pod_container_status_waiting_reason{reason="ImagePullBackOff"}[5m]
+                ) >= 1
+              )
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "[{{ $labels.team }}/{{ $labels.squad }}] Pod {{ $labels.namespace }}/{{ $labels.pod }} ImagePullBackOff-dadır"
+              description: >-
+                Container {{ $labels.container }} in pod
+                {{ $labels.namespace }}/{{ $labels.pod }}
+                cannot pull the image. Check image name and registry credentials.
+                Team: {{ $labels.team }}, Env: {{ $labels.environment }}.
+
+          - alert: PodErrImagePull
+            expr: |
+              (
+                max_over_time(
+                  kube_pod_container_status_waiting_reason{reason="ErrImagePull"}[5m]
+                ) >= 1
+              )
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "[{{ $labels.team }}/{{ $labels.squad }}] Pod {{ $labels.namespace }}/{{ $labels.pod }} ErrImagePull"
+              description: >-
+                Container {{ $labels.container }} in pod
+                {{ $labels.namespace }}/{{ $labels.pod }}
+                failed to pull image. Verify image name, tag, and registry access.
+                Team: {{ $labels.team }}, Env: {{ $labels.environment }}.
+
+          - alert: PodCreateContainerConfigError
+            expr: |
+              (
+                max_over_time(
+                  kube_pod_container_status_waiting_reason{reason="CreateContainerConfigError"}[5m]
+                ) >= 1
+              )
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "[{{ $labels.team }}/{{ $labels.squad }}] Pod {{ $labels.namespace }}/{{ $labels.pod }} ConfigMap/Secret xətası"
+              description: >-
+                Container {{ $labels.container }} in pod
+                {{ $labels.namespace }}/{{ $labels.pod }}
+                has CreateContainerConfigError. A referenced ConfigMap or Secret likely does not exist.
+                Team: {{ $labels.team }}, Env: {{ $labels.environment }}.
+
+          - alert: PodCreateContainerError
+            expr: |
+              (
+                max_over_time(
+                  kube_pod_container_status_waiting_reason{reason="CreateContainerError"}[5m]
+                ) >= 1
+              )
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "[{{ $labels.team }}/{{ $labels.squad }}] Pod {{ $labels.namespace }}/{{ $labels.pod }} container yaradıla bilmir"
+              description: >-
+                Container {{ $labels.container }} in pod
+                {{ $labels.namespace }}/{{ $labels.pod }}
+                cannot be created. Check pod events for details.
+                Team: {{ $labels.team }}, Env: {{ $labels.environment }}.
+
+          - alert: InitContainerFailed
+            expr: |
+              (
+                kube_pod_init_container_status_last_terminated_reason{reason!="Completed"} == 1
+              )
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[{{ $labels.team }}/{{ $labels.squad }}] Pod {{ $labels.namespace }}/{{ $labels.pod }} init container fail olub"
+              description: >-
+                Init container {{ $labels.container }} in pod
+                {{ $labels.namespace }}/{{ $labels.pod }}
+                terminated with reason: {{ $labels.reason }}.
+                Team: {{ $labels.team }}, Env: {{ $labels.environment }}.
+
+          - alert: PodContainerNotRunning
+            expr: |
+              (
+                kube_pod_container_status_running == 0
+                and kube_pod_container_status_terminated == 0
+                and kube_pod_container_status_waiting == 1
+              )
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[{{ $labels.team }}/{{ $labels.squad }}] Container {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} gözləmədədir"
+              description: >-
+                Container {{ $labels.container }} in pod
+                {{ $labels.namespace }}/{{ $labels.pod }}
+                has been in a waiting state for more than 10 minutes.
+                Team: {{ $labels.team }}, Env: {{ $labels.environment }}.
+
+      # ================================================================
+      #  2. DEPLOYMENT HEALTH
+      # ================================================================
+      - name: deployment-health
+        rules:
+          - alert: DeploymentReplicasUnavailable
+            expr: |
+              (
+                kube_deployment_status_replicas_available == 0
+                and
+                kube_deployment_spec_replicas > 0
+              )
+              * on(cluster, namespace, deployment)
+              (
+                max by (cluster, namespace, deployment) (
+                  label_replace(
+                    (
+                      namespace_workload_pod:kube_pod_owner:relabel
+                      * on(pod, namespace, cluster)
+                      group_left()
+                      kube_pod_labels{environment="prod", team="Fintech-Sre"}
+                    ),
+                    "deployment", "$1", "workload", "(.*)"
+                  )
+                )
+              )
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Deployment {{ $labels.namespace }}/{{ $labels.deployment }} - heç bir replica available deyil"
+              description: >-
+                Deployment {{ $labels.namespace }}/{{ $labels.deployment }}
+                has 0 available replicas for more than 5 minutes.
+
+          - alert: DeploymentReplicaMismatch
+            expr: |
+              (
+                kube_deployment_spec_replicas
+                !=
+                kube_deployment_status_replicas_available
+              )
+              * on(cluster, namespace, deployment)
+              (
+                max by (cluster, namespace, deployment) (
+                  label_replace(
+                    (
+                      namespace_workload_pod:kube_pod_owner:relabel
+                      * on(pod, namespace, cluster)
+                      group_left()
+                      kube_pod_labels{environment="prod", team="Fintech-Sre"}
+                    ),
+                    "deployment", "$1", "workload", "(.*)"
+                  )
+                )
+              )
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Deployment {{ $labels.namespace }}/{{ $labels.deployment }} replica uyğunsuzluğu"
+              description: >-
+                Deployment {{ $labels.namespace }}/{{ $labels.deployment }}
+                desired={{ $value }} vs available replicas mismatch
+                for more than 15 minutes.
+
+          - alert: DeploymentRolloutStuck
+            expr: |
+              (
+                kube_deployment_status_observed_generation
+                !=
+                kube_deployment_metadata_generation
+              )
+              * on(cluster, namespace, deployment)
+              (
+                max by (cluster, namespace, deployment) (
+                  label_replace(
+                    (
+                      namespace_workload_pod:kube_pod_owner:relabel
+                      * on(pod, namespace, cluster)
+                      group_left()
+                      kube_pod_labels{environment="prod", team="Fintech-Sre"}
+                    ),
+                    "deployment", "$1", "workload", "(.*)"
+                  )
+                )
+              )
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Deployment {{ $labels.namespace }}/{{ $labels.deployment }} rollout ilişib"
+              description: >-
+                Deployment {{ $labels.namespace }}/{{ $labels.deployment }}
+                rollout has not progressed for more than 15 minutes.
+                The observed generation does not match the desired generation.
+
+          - alert: DeploymentScaledToZero
+            expr: |
+              (kube_deployment_spec_replicas == 0)
+              * on(cluster, namespace, deployment)
+              (
+                max by (cluster, namespace, deployment) (
+                  label_replace(
+                    (
+                      namespace_workload_pod:kube_pod_owner:relabel
+                      * on(pod, namespace, cluster)
+                      group_left()
+                      kube_pod_labels{environment="prod", team="Fintech-Sre"}
+                    ),
+                    "deployment", "$1", "workload", "(.*)"
+                  )
+                )
+              )
+            for: 1h
+            labels:
+              severity: info
+            annotations:
+              summary: "Deployment {{ $labels.namespace }}/{{ $labels.deployment }} 0-a scale olunub"
+              description: >-
+                Deployment {{ $labels.namespace }}/{{ $labels.deployment }}
+                has been scaled to 0 replicas for more than 1 hour. Intentional?
+
+          - alert: DeploymentUpdatedReplicasLagging
+            expr: |
+              (
+                kube_deployment_status_replicas_updated
+                <
+                kube_deployment_spec_replicas
+              )
+              * on(cluster, namespace, deployment)
+              (
+                max by (cluster, namespace, deployment) (
+                  label_replace(
+                    (
+                      namespace_workload_pod:kube_pod_owner:relabel
+                      * on(pod, namespace, cluster)
+                      group_left()
+                      kube_pod_labels{environment="prod", team="Fintech-Sre"}
+                    ),
+                    "deployment", "$1", "workload", "(.*)"
+                  )
+                )
+              )
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Deployment {{ $labels.namespace }}/{{ $labels.deployment }} updated replicas geridə qalır"
+              description: >-
+                Deployment {{ $labels.namespace }}/{{ $labels.deployment }}
+                has only {{ $value }} updated replicas vs desired spec
+                for more than 15 minutes. Possible rollout issue.
+
+      # ================================================================
+      #  3. STATEFULSET HEALTH
+      # ================================================================
+      - name: statefulset-health
+        rules:
+          - alert: StatefulSetReplicaMismatch
+            expr: |
+              (
+                kube_statefulset_status_replicas_ready
+                !=
+                kube_statefulset_replicas
+              )
+              * on(cluster, namespace, statefulset)
+              (
+                max by (cluster, namespace, statefulset) (
+                  label_replace(
+                    (
+                      namespace_workload_pod:kube_pod_owner:relabel
+                      * on(pod, namespace, cluster)
+                      group_left()
+                      kube_pod_labels{environment="prod", team="Fintech-Sre"}
+                    ),
+                    "statefulset", "$1", "workload", "(.*)"
+                  )
+                )
+              )
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "StatefulSet {{ $labels.namespace }}/{{ $labels.statefulset }} replica uyğunsuzluğu"
+              description: >-
+                StatefulSet {{ $labels.namespace }}/{{ $labels.statefulset }}
+                has {{ $value }} ready replicas vs desired for more than 15 minutes.
+
+          - alert: StatefulSetRolloutStuck
+            expr: |
+              (
+                kube_statefulset_status_observed_generation
+                !=
+                kube_statefulset_metadata_generation
+              )
+              * on(cluster, namespace, statefulset)
+              (
+                max by (cluster, namespace, statefulset) (
+                  label_replace(
+                    (
+                      namespace_workload_pod:kube_pod_owner:relabel
+                      * on(pod, namespace, cluster)
+                      group_left()
+                      kube_pod_labels{environment="prod", team="Fintech-Sre"}
+                    ),
+                    "statefulset", "$1", "workload", "(.*)"
+                  )
+                )
+              )
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "StatefulSet {{ $labels.namespace }}/{{ $labels.statefulset }} rollout ilişib"
+              description: >-
+                StatefulSet {{ $labels.namespace }}/{{ $labels.statefulset }}
+                rollout has not progressed for more than 15 minutes.
+
+          - alert: StatefulSetUpdateNotRolledOut
+            expr: |
+              (
+                max without (revision) (
+                  kube_statefulset_status_current_revision
+                    unless
+                  kube_statefulset_status_update_revision
+                ) * (
+                  kube_statefulset_replicas
+                    !=
+                  kube_statefulset_status_replicas_updated
+                )
+              )
+              * on(cluster, namespace, statefulset)
+              (
+                max by (cluster, namespace, statefulset) (
+                  label_replace(
+                    (
+                      namespace_workload_pod:kube_pod_owner:relabel
+                      * on(pod, namespace, cluster)
+                      group_left()
+                      kube_pod_labels{environment="prod", team="Fintech-Sre"}
+                    ),
+                    "statefulset", "$1", "workload", "(.*)"
+                  )
+                )
+              )
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "StatefulSet {{ $labels.namespace }}/{{ $labels.statefulset }} update rollout tamamlanmayıb"
+              description: >-
+                StatefulSet {{ $labels.namespace }}/{{ $labels.statefulset }}
+                has a pending update that has not been fully rolled out.
+
+      # ================================================================
+      #  4. DAEMONSET HEALTH
+      # ================================================================
+      - name: daemonset-health
+        rules:
+          - alert: DaemonSetNotScheduled
+            expr: |
+              (
+                kube_daemonset_status_desired_number_scheduled
+                -
+                kube_daemonset_status_current_number_scheduled
+                > 0
+              )
+              * on(cluster, namespace, daemonset)
+              (
+                max by (cluster, namespace, daemonset) (
+                  label_replace(
+                    (
+                      namespace_workload_pod:kube_pod_owner:relabel
+                      * on(pod, namespace, cluster)
+                      group_left()
+                      kube_pod_labels{environment="prod", team="Fintech-Sre"}
+                    ),
+                    "daemonset", "$1", "workload", "(.*)"
+                  )
+                )
+              )
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "DaemonSet {{ $labels.namespace }}/{{ $labels.daemonset }} tam schedule olunmayıb"
+              description: >-
+                DaemonSet {{ $labels.namespace }}/{{ $labels.daemonset }}
+                has {{ $value }} pods not yet scheduled on nodes.
+
+          - alert: DaemonSetMisScheduled
+            expr: |
+              (kube_daemonset_status_number_misscheduled > 0)
+              * on(cluster, namespace, daemonset)
+              (
+                max by (cluster, namespace, daemonset) (
+                  label_replace(
+                    (
+                      namespace_workload_pod:kube_pod_owner:relabel
+                      * on(pod, namespace, cluster)
+                      group_left()
+                      kube_pod_labels{environment="prod", team="Fintech-Sre"}
+                    ),
+                    "daemonset", "$1", "workload", "(.*)"
+                  )
+                )
+              )
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "DaemonSet {{ $labels.namespace }}/{{ $labels.daemonset }} yanlış node-larda çalışır"
+              description: >-
+                DaemonSet {{ $labels.namespace }}/{{ $labels.daemonset }}
+                has {{ $value }} pods running on nodes where they should not be.
+
+          - alert: DaemonSetNotReady
+            expr: |
+              (
+                kube_daemonset_status_number_ready
+                /
+                kube_daemonset_status_desired_number_scheduled
+                < 1
+              )
+              * on(cluster, namespace, daemonset)
+              (
+                max by (cluster, namespace, daemonset) (
+                  label_replace(
+                    (
+                      namespace_workload_pod:kube_pod_owner:relabel
+                      * on(pod, namespace, cluster)
+                      group_left()
+                      kube_pod_labels{environment="prod", team="Fintech-Sre"}
+                    ),
+                    "daemonset", "$1", "workload", "(.*)"
+                  )
+                )
+              )
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "DaemonSet {{ $labels.namespace }}/{{ $labels.daemonset }} bütün podları ready deyil"
+              description: >-
+                DaemonSet {{ $labels.namespace }}/{{ $labels.daemonset }}
+                only {{ $value | humanizePercentage }} of desired pods are ready.
+
+          - alert: DaemonSetRolloutStuck
+            expr: |
+              (
+                kube_daemonset_status_desired_number_scheduled
+                -
+                kube_daemonset_status_updated_number_scheduled
+                > 0
+              )
+              * on(cluster, namespace, daemonset)
+              (
+                max by (cluster, namespace, daemonset) (
+                  label_replace(
+                    (
+                      namespace_workload_pod:kube_pod_owner:relabel
+                      * on(pod, namespace, cluster)
+                      group_left()
+                      kube_pod_labels{environment="prod", team="Fintech-Sre"}
+                    ),
+                    "daemonset", "$1", "workload", "(.*)"
+                  )
+                )
+              )
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "DaemonSet {{ $labels.namespace }}/{{ $labels.daemonset }} rollout ilişib"
+              description: >-
+                DaemonSet {{ $labels.namespace }}/{{ $labels.daemonset }}
+                has {{ $value }} pods not yet updated for more than 15 minutes.
+
+      # ================================================================
+      #  5. JOB / CRONJOB HEALTH
+      # ================================================================
+      - name: job-cronjob-health
+        rules:
+          - alert: JobFailed
+            expr: |
+              (kube_job_status_failed > 0)
+              * on(cluster, namespace, job_name)
+              (
+                max by (cluster, namespace, job_name) (
+                  label_replace(
+                    (
+                      namespace_workload_pod:kube_pod_owner:relabel
+                      * on(pod, namespace, cluster)
+                      group_left()
+                      kube_pod_labels{environment="prod", team="Fintech-Sre"}
+                    ),
+                    "job_name", "$1", "workload", "(.*)"
+                  )
+                )
+              )
+            for: 1m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Job {{ $labels.namespace }}/{{ $labels.job_name }} fail olub"
+              description: >-
+                Job {{ $labels.namespace }}/{{ $labels.job_name }}
+                has {{ $value }} failed executions.
+
+          - alert: JobSlowCompletion
+            expr: |
+              (kube_job_spec_completions - kube_job_status_succeeded > 0)
+              * on(cluster, namespace, job_name)
+              (
+                max by (cluster, namespace, job_name) (
+                  label_replace(
+                    (
+                      namespace_workload_pod:kube_pod_owner:relabel
+                      * on(pod, namespace, cluster)
+                      group_left()
+                      kube_pod_labels{environment="prod", team="Fintech-Sre"}
+                    ),
+                    "job_name", "$1", "workload", "(.*)"
+                  )
+                )
+              )
+            for: 30m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Job {{ $labels.namespace }}/{{ $labels.job_name }} uzun müddətdir tamamlanmır"
+              description: >-
+                Job {{ $labels.namespace }}/{{ $labels.job_name }}
+                has not completed all its tasks for more than 30 minutes.
+
+          - alert: JobNotStarted
+            expr: |
+              (
+                kube_job_status_active == 0
+                and kube_job_status_succeeded == 0
+                and kube_job_status_failed == 0
+              )
+              * on(cluster, namespace, job_name)
+              (
+                max by (cluster, namespace, job_name) (
+                  label_replace(
+                    (
+                      namespace_workload_pod:kube_pod_owner:relabel
+                      * on(pod, namespace, cluster)
+                      group_left()
+                      kube_pod_labels{environment="prod", team="Fintech-Sre"}
+                    ),
+                    "job_name", "$1", "workload", "(.*)"
+                  )
+                )
+              )
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Job {{ $labels.namespace }}/{{ $labels.job_name }} başlamayıb"
+              description: >-
+                Job {{ $labels.namespace }}/{{ $labels.job_name }}
+                has not started any pods for more than 15 minutes.
+
+          - alert: CronJobSuspended
+            expr: |
+              kube_cronjob_spec_suspend == 1
+            for: 24h
+            labels:
+              severity: info
+            annotations:
+              summary: "CronJob {{ $labels.namespace }}/{{ $labels.cronjob }} suspend edilib"
+              description: >-
+                CronJob {{ $labels.namespace }}/{{ $labels.cronjob }}
+                has been suspended for more than 24 hours. Intentional?
+
+          - alert: CronJobRunningTooLong
+            expr: |
+              time() - kube_cronjob_next_schedule_time > 3600
+              and kube_cronjob_next_schedule_time > 0
+            for: 1h
+            labels:
+              severity: warning
+            annotations:
+              summary: "CronJob {{ $labels.namespace }}/{{ $labels.cronjob }} schedule-dan geridə qalır"
+              description: >-
+                CronJob {{ $labels.namespace }}/{{ $labels.cronjob }}
+                missed its last scheduled time by more than 1 hour.
+
+      # ================================================================
+      #  6. NODE HEALTH
+      # ================================================================
+      - name: node-health
+        rules:
+          - alert: NodeNotReady
+            expr: |
+              (kube_node_status_condition{condition="Ready", status="true"} == 0)
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Node {{ $labels.node }} Ready deyil"
+              description: >-
+                Node {{ $labels.node }} has been in a NotReady state
+                for more than 5 minutes. All pods on this node may be affected.
+
+          - alert: NodeMemoryPressure
+            expr: |
+              (kube_node_status_condition{condition="MemoryPressure", status="true"} == 1)
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Node {{ $labels.node }} MemoryPressure altındadır"
+              description: >-
+                Node {{ $labels.node }} is under memory pressure.
+                Pods may be evicted. Consider adding more nodes or increasing node memory.
+
+          - alert: NodeDiskPressure
+            expr: |
+              (kube_node_status_condition{condition="DiskPressure", status="true"} == 1)
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Node {{ $labels.node }} DiskPressure altındadır"
+              description: >-
+                Node {{ $labels.node }} is under disk pressure.
+                Pods may be evicted. Clean up images/logs or expand disk.
+
+          - alert: NodePIDPressure
+            expr: |
+              (kube_node_status_condition{condition="PIDPressure", status="true"} == 1)
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Node {{ $labels.node }} PID Pressure altındadır"
+              description: >-
+                Node {{ $labels.node }} is running low on process IDs.
+                Too many processes are running on this node.
+
+          - alert: NodeNetworkUnavailable
+            expr: |
+              (kube_node_status_condition{condition="NetworkUnavailable", status="true"} == 1)
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Node {{ $labels.node }} şəbəkəsi əlçatmazdır"
+              description: >-
+                Node {{ $labels.node }} network is unavailable.
+                All pods on this node cannot communicate with the cluster.
+
+          - alert: NodeUnschedulable
+            expr: |
+              (kube_node_spec_unschedulable == 1)
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 30m
+            labels:
+              severity: info
+            annotations:
+              summary: "Node {{ $labels.node }} unschedulable vəziyyətdədir"
+              description: >-
+                Node {{ $labels.node }} has been marked unschedulable (cordoned)
+                for more than 30 minutes. Is maintenance complete?
+
+          - alert: NodeTooManyPods
+            expr: |
+              (
+                count by (node, cluster) (kube_pod_info)
+                /
+                kube_node_status_allocatable{resource="pods"}
+                > 0.9
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Node {{ $labels.node }}-da pod limiti dolmaq üzrədir"
+              description: >-
+                Node {{ $labels.node }} is running at
+                {{ $value | humanizePercentage }} of its pod capacity.
+                New pods may not be schedulable.
+
+      # ================================================================
+      #  7. RESOURCE ALERTS (CPU / Memory / Limits)
+      # ================================================================
+      - name: resource-alerts
+        rules:
+          - alert: ContainerHighCPU
+            expr: |
+              (
+                (
+                  sum by (namespace, pod, container) (rate(container_cpu_usage_seconds_total{container!="", image!=""}[5m]))
+                  /
+                  sum by (namespace, pod, container) (kube_pod_container_resource_limits{resource="cpu"})
+                ) > 0.9
+              )
+              * on(namespace, pod) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[{{ $labels.team }}/{{ $labels.squad }}] Container {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} yüksək CPU"
+              description: >-
+                Container {{ $labels.container }} in pod
+                {{ $labels.namespace }}/{{ $labels.pod }}
+                is using {{ $value | humanizePercentage }} of its CPU limit.
+                Team: {{ $labels.team }}, Env: {{ $labels.environment }}.
+
+          - alert: ContainerHighMemory
+            expr: |
+              (
+                (
+                  sum by (namespace, pod, container) (container_memory_working_set_bytes{container!="", image!=""})
+                  /
+                  sum by (namespace, pod, container) (kube_pod_container_resource_limits{resource="memory"})
+                ) > 0.9
+              )
+              * on(namespace, pod) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[{{ $labels.team }}/{{ $labels.squad }}] Container {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} yüksək memory"
+              description: >-
+                Container {{ $labels.container }} in pod
+                {{ $labels.namespace }}/{{ $labels.pod }}
+                is using {{ $value | humanizePercentage }} of its memory limit. OOMKill riski var!
+                Team: {{ $labels.team }}, Env: {{ $labels.environment }}.
+
+          - alert: ContainerCPUThrottled
+            expr: |
+              (
+                (
+                  sum by (namespace, pod, container) (
+                    increase(container_cpu_cfs_throttled_periods_total{container!="", image!=""}[5m])
+                  )
+                  /
+                  sum by (namespace, pod, container) (
+                    increase(container_cpu_cfs_periods_total{container!="", image!=""}[5m])
+                  )
+                ) > 0.5
+              )
+              * on(namespace, pod) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[{{ $labels.team }}/{{ $labels.squad }}] Container {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} CPU throttle olunur"
+              description: >-
+                Container {{ $labels.container }} in pod
+                {{ $labels.namespace }}/{{ $labels.pod }}
+                is being CPU throttled {{ $value | humanizePercentage }} of the time.
+                Team: {{ $labels.team }}, Env: {{ $labels.environment }}.
+
+          - alert: ContainerNoCPULimit
+            expr: |
+              (
+                count by (namespace, pod, container) (
+                  kube_pod_container_info
+                  unless
+                  kube_pod_container_resource_limits{resource="cpu"}
+                ) > 0
+              )
+              * on(namespace, pod) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 30m
+            labels:
+              severity: info
+            annotations:
+              summary: "[{{ $labels.team }}/{{ $labels.squad }}] Container {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} CPU limiti yoxdur"
+              description: >-
+                Container {{ $labels.container }} in pod
+                {{ $labels.namespace }}/{{ $labels.pod }}
+                has no CPU limit defined.
+                Team: {{ $labels.team }}, Env: {{ $labels.environment }}.
+
+          - alert: ContainerNoMemoryLimit
+            expr: |
+              (
+                count by (namespace, pod, container) (
+                  kube_pod_container_info
+                  unless
+                  kube_pod_container_resource_limits{resource="memory"}
+                ) > 0
+              )
+              * on(namespace, pod) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 30m
+            labels:
+              severity: info
+            annotations:
+              summary: "[{{ $labels.team }}/{{ $labels.squad }}] Container {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} memory limiti yoxdur"
+              description: >-
+                Container {{ $labels.container }} in pod
+                {{ $labels.namespace }}/{{ $labels.pod }}
+                has no memory limit defined. OOMKill riski var.
+                Team: {{ $labels.team }}, Env: {{ $labels.environment }}.
+
+          - alert: ContainerCPURequestOvercommit
+            expr: |
+              (
+                sum by (node, cluster) (
+                  kube_pod_container_resource_requests{resource="cpu"}
+                )
+                /
+                sum by (node, cluster) (
+                  kube_node_status_allocatable{resource="cpu"}
+                ) > 1
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Node {{ $labels.node }} CPU request overcommit"
+              description: >-
+                Node {{ $labels.node }} has CPU requests exceeding
+                allocatable capacity ({{ $value | humanizePercentage }}).
+
+          - alert: ContainerMemoryRequestOvercommit
+            expr: |
+              (
+                sum by (node, cluster) (
+                  kube_pod_container_resource_requests{resource="memory"}
+                )
+                /
+                sum by (node, cluster) (
+                  kube_node_status_allocatable{resource="memory"}
+                ) > 1
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Node {{ $labels.node }} memory request overcommit"
+              description: >-
+                Node {{ $labels.node }} has memory requests exceeding
+                allocatable capacity ({{ $value | humanizePercentage }}).
+                OOM risk at node level.
+
+      # ================================================================
+      #  8. STORAGE / PVC ALERTS
+      # ================================================================
+      - name: storage-alerts
+        rules:
+          - alert: PVCPending
+            expr: |
+              kube_persistentvolumeclaim_status_phase{phase="Pending"} == 1
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "PVC {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} Pending-dədir"
+              description: >-
+                PVC {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }}
+                has been in Pending state for more than 15 minutes.
+                Check StorageClass availability and provisioner status.
+
+          - alert: PVCLost
+            expr: |
+              kube_persistentvolumeclaim_status_phase{phase="Lost"} == 1
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              summary: "PVC {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} Lost vəziyyətdədir"
+              description: >-
+                PVC {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }}
+                is in Lost state. The underlying PersistentVolume has been deleted
+                or is no longer available. DATA LOSS RISK!
+
+          - alert: PVFillingUp
+            expr: |
+              (
+                kubelet_volume_stats_used_bytes
+                /
+                kubelet_volume_stats_capacity_bytes
+              ) > 0.85
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "PVC {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} dolmaq üzrədir"
+              description: >-
+                PVC {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }}
+                is {{ $value | humanizePercentage }} full.
+                If it reaches 100%, the application may crash or data loss may occur.
+
+          - alert: PVFillingUpCritical
+            expr: |
+              (
+                kubelet_volume_stats_used_bytes
+                /
+                kubelet_volume_stats_capacity_bytes
+              ) > 0.95
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "PVC {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} demək olar ki doludur!"
+              description: >-
+                PVC {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }}
+                is {{ $value | humanizePercentage }} full. Immediate action required!
+
+          - alert: PVInodeFillingUp
+            expr: |
+              (
+                kubelet_volume_stats_inodes_used
+                /
+                kubelet_volume_stats_inodes
+              ) > 0.9
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "PVC {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }} inode-ları tükənir"
+              description: >-
+                PVC {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }}
+                has used {{ $value | humanizePercentage }} of its inodes.
+                Too many small files.
+
+      # ================================================================
+      #  9. HPA (HORIZONTAL POD AUTOSCALER) ALERTS
+      # ================================================================
+      - name: hpa-alerts
+        rules:
+          - alert: HPAMaxedOut
+            expr: |
+              kube_horizontalpodautoscaler_status_current_replicas
+              ==
+              kube_horizontalpodautoscaler_spec_max_replicas
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "HPA {{ $labels.namespace }}/{{ $labels.horizontalpodautoscaler }} max replica-ya çatıb"
+              description: >-
+                HPA {{ $labels.namespace }}/{{ $labels.horizontalpodautoscaler }}
+                has been at maximum replicas ({{ $value }}) for more than 15 minutes.
+                The application may need more capacity than HPA allows.
+
+          - alert: HPAScaleDown
+            expr: |
+              kube_horizontalpodautoscaler_status_current_replicas
+              ==
+              kube_horizontalpodautoscaler_spec_min_replicas
+              and
+              kube_horizontalpodautoscaler_spec_min_replicas > 1
+            for: 1h
+            labels:
+              severity: info
+            annotations:
+              summary: "HPA {{ $labels.namespace }}/{{ $labels.horizontalpodautoscaler }} minimum-a enilib"
+              description: >-
+                HPA {{ $labels.namespace }}/{{ $labels.horizontalpodautoscaler }}
+                has been at minimum replicas for more than 1 hour.
+                Consider reducing min replicas if traffic is consistently low.
+
+          - alert: HPADesiredReplicasMismatch
+            expr: |
+              kube_horizontalpodautoscaler_status_desired_replicas
+              !=
+              kube_horizontalpodautoscaler_status_current_replicas
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "HPA {{ $labels.namespace }}/{{ $labels.horizontalpodautoscaler }} istədiyi replica-ya çata bilmir"
+              description: >-
+                HPA {{ $labels.namespace }}/{{ $labels.horizontalpodautoscaler }}
+                wants {{ $value }} replicas but cannot achieve it.
+                Check for resource constraints or scheduling issues.
+
+      # ================================================================
+      #  10. NETWORK / SERVICE / ENDPOINT ALERTS
+      # ================================================================
+      - name: network-alerts
+        rules:
+          - alert: ServiceWithNoEndpoints
+            expr: |
+              kube_endpoint_address_available == 0
+              and on(endpoint, namespace) kube_service_info
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Service {{ $labels.namespace }}/{{ $labels.endpoint }} - heç bir endpoint yoxdur"
+              description: >-
+                Service {{ $labels.namespace }}/{{ $labels.endpoint }}
+                has 0 available endpoints for more than 10 minutes.
+                No backend pods are matching the service selector.
+
+          - alert: EndpointNotReadyRatio
+            expr: |
+              kube_endpoint_address_not_ready
+              /
+              (kube_endpoint_address_available + kube_endpoint_address_not_ready)
+              > 0.5
+              and (kube_endpoint_address_available + kube_endpoint_address_not_ready) > 0
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Service {{ $labels.namespace }}/{{ $labels.endpoint }} - endpoint-ların yarıdan çoxu ready deyil"
+              description: >-
+                Service {{ $labels.namespace }}/{{ $labels.endpoint }}
+                has {{ $value | humanizePercentage }} of endpoints not ready.
+
+          - alert: IngressTLSCertExpiringSoon
+            expr: |
+              (
+                kube_secret_created{type="kubernetes.io/tls"}
+                + 90 * 24 * 3600
+              ) < time()
+            for: 1h
+            labels:
+              severity: info
+            annotations:
+              summary: "TLS secret {{ $labels.namespace }}/{{ $labels.secret }} 90 gündən köhnədir"
+              description: >-
+                TLS secret {{ $labels.namespace }}/{{ $labels.secret }}
+                was created more than 90 days ago. If it is not auto-renewed,
+                it may expire soon.
+
+      # ================================================================
+      #  11. RESOURCE QUOTA / LIMITRANGE ALERTS
+      # ================================================================
+      - name: quota-alerts
+        rules:
+          - alert: ResourceQuotaCPUNearLimit
+            expr: |
+              kube_resourcequota{type="used", resource="requests.cpu"}
+              /
+              kube_resourcequota{type="hard", resource="requests.cpu"}
+              > 0.9
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Namespace {{ $labels.namespace }} CPU quota limiti dolmaq üzrədir"
+              description: >-
+                Namespace {{ $labels.namespace }} has used
+                {{ $value | humanizePercentage }} of its CPU request quota.
+                New pods may not be schedulable.
+
+          - alert: ResourceQuotaMemoryNearLimit
+            expr: |
+              kube_resourcequota{type="used", resource="requests.memory"}
+              /
+              kube_resourcequota{type="hard", resource="requests.memory"}
+              > 0.9
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Namespace {{ $labels.namespace }} memory quota limiti dolmaq üzrədir"
+              description: >-
+                Namespace {{ $labels.namespace }} has used
+                {{ $value | humanizePercentage }} of its memory request quota.
+
+          - alert: ResourceQuotaPodCountNearLimit
+            expr: |
+              kube_resourcequota{type="used", resource="pods"}
+              /
+              kube_resourcequota{type="hard", resource="pods"}
+              > 0.9
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Namespace {{ $labels.namespace }} pod say limiti dolmaq üzrədir"
+              description: >-
+                Namespace {{ $labels.namespace }} has used
+                {{ $value | humanizePercentage }} of its pod count quota.
+
+      # ================================================================
+      #  12. NAMESPACE-LEVEL AGGREGATE ALERTS
+      # ================================================================
+      - name: namespace-alerts
+        rules:
+          - alert: NamespaceHighPodFailureRate
+            expr: |
+              count by (namespace) (
+                kube_pod_status_phase{phase=~"Failed|Unknown"}
+                * on(namespace, pod, cluster) group_left()
+                kube_pod_labels{environment="prod", team="Fintech-Sre"}
+              ) > 3
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Namespace {{ $labels.namespace }}-da çoxlu pod fail olur"
+              description: >-
+                Namespace {{ $labels.namespace }} has {{ $value }} pods
+                in Failed/Unknown state for more than 5 minutes.
+
+          - alert: NamespaceHighRestartRate
+            expr: |
+              sum by (namespace) (
+                increase(kube_pod_container_status_restarts_total[1h])
+                * on(namespace, pod, cluster) group_left()
+                kube_pod_labels{environment="prod", team="Fintech-Sre"}
+              ) > 20
+            for: 0m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Namespace {{ $labels.namespace }}-da çoxlu restart var"
+              description: >-
+                Namespace {{ $labels.namespace }} has {{ $value | printf "%.0f" }}
+                total container restarts in the last hour.
+
+          - alert: NamespaceAllPodsNotReady
+            expr: |
+              count by (namespace) (
+                kube_pod_status_ready{condition="true"} == 0
+                * on(namespace, pod, cluster) group_left()
+                kube_pod_labels{environment="prod", team="Fintech-Sre"}
+              )
+              ==
+              count by (namespace) (
+                kube_pod_info
+                * on(namespace, pod, cluster) group_left()
+                kube_pod_labels{environment="prod", team="Fintech-Sre"}
+              )
+              and count by (namespace) (
+                kube_pod_info
+                * on(namespace, pod, cluster) group_left()
+                kube_pod_labels{environment="prod", team="Fintech-Sre"}
+              ) > 0
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Namespace {{ $labels.namespace }}-da BÜTÜN podlar not-ready"
+              description: >-
+                All pods in namespace {{ $labels.namespace }}
+                are in a not-ready state. Complete service outage!
+
+          - alert: NamespaceNoPods
+            expr: |
+              count by (namespace) (kube_namespace_labels)
+              unless count by (namespace) (kube_pod_info)
+            for: 1h
+            labels:
+              severity: info
+            annotations:
+              summary: "Namespace {{ $labels.namespace }}-da heç bir pod yoxdur"
+              description: >-
+                Namespace {{ $labels.namespace }} has no running pods
+                for more than 1 hour. Is it an abandoned namespace?
+
+      # ================================================================
+      #  13. PROMETHEUS & ALERTMANAGER SELF-MONITORING
+      # ================================================================
+      - name: monitoring-self
+        rules:
+          - alert: PrometheusTargetDown
+            expr: |
+              up == 0
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Prometheus target {{ $labels.job }}/{{ $labels.instance }} down-dır"
+              description: >-
+                Prometheus cannot scrape target {{ $labels.instance }}
+                (job={{ $labels.job }}) for more than 5 minutes.
+
+          - alert: PrometheusConfigReloadFailed
+            expr: |
+              prometheus_config_last_reload_successful == 0
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Prometheus konfiqurasiya reload uğursuz olub"
+              description: >-
+                Prometheus failed to reload its configuration.
+                The last attempted config reload was unsuccessful.
+                Check prometheus.yml syntax.
+
+          - alert: PrometheusRuleEvaluationFailures
+            expr: |
+              increase(prometheus_rule_evaluation_failures_total[5m]) > 0
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Prometheus rule evaluation xətaları var"
+              description: >-
+                Prometheus is failing to evaluate some alerting/recording rules.
+                {{ $value | printf "%.0f" }} failures in the last 5 minutes.
+
+          - alert: PrometheusRuleEvaluationSlow
+            expr: |
+              prometheus_rule_group_last_duration_seconds
+              >
+              prometheus_rule_group_interval_seconds
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Prometheus rule evaluation yavaşdır"
+              description: >-
+                Rule group {{ $labels.rule_group }} is taking longer to evaluate
+                ({{ $value | printf "%.1f" }}s) than its interval.
+                Consider splitting or optimizing rules.
+
+          - alert: PrometheusNotConnectedToAlertmanager
+            expr: |
+              prometheus_notifications_alertmanagers_discovered < 1
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Prometheus Alertmanager-ə qoşula bilmir"
+              description: >-
+                Prometheus has not discovered any Alertmanager instances.
+                Alerts will not be delivered!
+
+          - alert: PrometheusTSDBCompactionsFailing
+            expr: |
+              increase(prometheus_tsdb_compactions_failed_total[6h]) > 0
+            for: 0m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Prometheus TSDB compaction uğursuz olur"
+              description: >-
+                Prometheus TSDB compactions are failing.
+                This may lead to increased disk usage and query latency.
+
+          - alert: PrometheusHighMemoryUsage
+            expr: |
+              process_resident_memory_bytes{job="prometheus"}
+              /
+              (1024 * 1024 * 1024)
+              > 2
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Prometheus yüksək memory istifadə edir"
+              description: >-
+                Prometheus is using {{ $value | printf "%.1f" }}GB of memory.
+                Consider reducing retention or increasing resources.
+
+          - alert: AlertmanagerConfigInconsistent
+            expr: |
+              alertmanager_config_last_reload_successful == 0
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Alertmanager konfiqurasiya reload uğursuz olub"
+              description: >-
+                Alertmanager failed to reload its configuration.
+                Notifications may not work as expected.
+
+          - alert: AlertmanagerFailedNotifications
+            expr: |
+              increase(alertmanager_notifications_failed_total[5m]) > 0
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Alertmanager bildiriş göndərə bilmir"
+              description: >-
+                Alertmanager failed to send {{ $value | printf "%.0f" }}
+                notifications via {{ $labels.integration }} in the last 5 minutes.
+
+          - alert: KubeStateMetricsDown
+            expr: |
+              up{job="kube-state-metrics"} == 0
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "kube-state-metrics down-dır"
+              description: >-
+                kube-state-metrics is not responding for more than 5 minutes.
+                All Kubernetes resource alerts will stop working!
+
+          - alert: PrometheusHighScrapeLatency
+            expr: |
+              prometheus_target_interval_length_seconds{quantile="0.99"} > 60
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Prometheus scrape latency yüksəkdir"
+              description: >-
+                Prometheus 99th percentile scrape interval is {{ $value | printf "%.1f" }}s
+                (job={{ $labels.job }}). Targets may be too slow to respond.
+
+          - alert: PrometheusHighQueryLatency
+            expr: |
+              histogram_quantile(0.99,
+                sum by (le) (rate(prometheus_http_request_duration_seconds_bucket{handler=~"/api/v1/query.*"}[5m]))
+              ) > 30
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Prometheus query latency yüksəkdir"
+              description: >-
+                Prometheus API query latency (p99) is {{ $value | printf "%.1f" }}s.
+                Complex queries or too many time series may be the cause.
+
+          - alert: PrometheusTSDBReloadsFailing
+            expr: |
+              increase(prometheus_tsdb_reloads_failures_total[6h]) > 0
+            for: 0m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Prometheus TSDB reload uğursuz olur"
+              description: >-
+                Prometheus TSDB has had reload failures in the last 6 hours.
+                Check disk space and filesystem health.
+
+          - alert: PrometheusWALCorruptions
+            expr: |
+              increase(prometheus_tsdb_wal_corruptions_total[6h]) > 0
+            for: 0m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Prometheus WAL corruption aşkarlanıb"
+              description: >-
+                Prometheus Write-Ahead Log corruption detected.
+                This can lead to data loss. Check disk health immediately.
+
+          - alert: PrometheusNotificationQueueFull
+            expr: |
+              prometheus_notifications_queue_length
+              /
+              prometheus_notifications_queue_capacity
+              > 0.9
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Prometheus notification queue dolmaq üzrədir"
+              description: >-
+                Prometheus notification queue is at {{ $value | humanizePercentage }}
+                capacity. Alerts may be dropped!
+
+          - alert: AlertmanagerClusterCommunicationFailure
+            expr: |
+              increase(alertmanager_cluster_reconnections_failed_total[5m]) > 0
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Alertmanager cluster kommunikasiya xətası"
+              description: >-
+                Alertmanager cluster has communication failures.
+                Alert deduplication may not work correctly.
+
+      # ================================================================
+      #  14. POD SCHEDULING & EVICTION
+      # ================================================================
+      - name: scheduling-eviction
+        rules:
+          - alert: PodEvicted
+            expr: |
+              (kube_pod_status_reason{reason="Evicted"} == 1)
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 1m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[{{ $labels.team }}/{{ $labels.squad }}] Pod {{ $labels.namespace }}/{{ $labels.pod }} evict olunub"
+              description: >-
+                Pod {{ $labels.namespace }}/{{ $labels.pod }}
+                has been evicted. Team: {{ $labels.team }}, Env: {{ $labels.environment }}.
+
+          - alert: PodUnschedulable
+            expr: |
+              (kube_pod_status_unschedulable == 1)
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[{{ $labels.team }}/{{ $labels.squad }}] Pod {{ $labels.namespace }}/{{ $labels.pod }} schedule oluna bilmir"
+              description: >-
+                Pod {{ $labels.namespace }}/{{ $labels.pod }}
+                cannot be scheduled for more than 10 minutes.
+                Team: {{ $labels.team }}, Env: {{ $labels.environment }}.
+
+          - alert: TooManyEvictedPods
+            expr: |
+              count by (namespace) (
+                kube_pod_status_reason{reason="Evicted"}
+                * on(namespace, pod, cluster) group_left()
+                kube_pod_labels{environment="prod", team="Fintech-Sre"}
+              ) > 5
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Namespace {{ $labels.namespace }}-da çoxlu evicted pod var"
+              description: >-
+                Namespace {{ $labels.namespace }} has {{ $value }}
+                evicted pods. Serious resource pressure on the cluster.
+                Run: kubectl get pods -n {{ $labels.namespace }} --field-selector=status.phase=Failed
+
+          - alert: PodPreempted
+            expr: |
+              (kube_pod_status_reason{reason="Preempting"} == 1)
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 1m
+            labels:
+              severity: info
+            annotations:
+              summary: "[{{ $labels.team }}/{{ $labels.squad }}] Pod {{ $labels.namespace }}/{{ $labels.pod }} preempt olunub"
+              description: >-
+                Pod {{ $labels.namespace }}/{{ $labels.pod }}
+                was preempted by a higher-priority pod.
+                Team: {{ $labels.team }}, Env: {{ $labels.environment }}.
+
+          - alert: NodeHasEvictionPressure
+            expr: |
+              (
+                kube_node_status_condition{condition="MemoryPressure", status="true"} == 1
+                or
+                kube_node_status_condition{condition="DiskPressure", status="true"} == 1
+                or
+                kube_node_status_condition{condition="PIDPressure", status="true"} == 1
+              )
+              and
+              count by (node) (
+                kube_pod_status_reason{reason="Evicted"}
+              ) > 0
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Node {{ $labels.node }} pressure altında eviction baş verir"
+              description: >-
+                Node {{ $labels.node }} is under resource pressure AND
+                pods are being evicted. Immediate attention needed.
+
+      # ================================================================
+      #  15. WORKLOAD AVAILABILITY (SLO-style)
+      # ================================================================
+      - name: workload-availability
+        rules:
+          - alert: WorkloadAvailabilityBelow100
+            expr: |
+              (
+                (
+                  kube_deployment_status_replicas_available
+                  /
+                  kube_deployment_spec_replicas
+                ) < 1
+                and kube_deployment_spec_replicas > 0
+              )
+              * on(cluster, namespace, deployment)
+              (
+                max by (cluster, namespace, deployment) (
+                  label_replace(
+                    (
+                      namespace_workload_pod:kube_pod_owner:relabel
+                      * on(pod, namespace, cluster)
+                      group_left()
+                      kube_pod_labels{environment="prod", team="Fintech-Sre"}
+                    ),
+                    "deployment", "$1", "workload", "(.*)"
+                  )
+                )
+              )
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Deployment {{ $labels.namespace }}/{{ $labels.deployment }} 100% available deyil"
+              description: >-
+                Deployment {{ $labels.namespace }}/{{ $labels.deployment }}
+                availability is {{ $value | humanizePercentage }}.
+                Some replicas are not available.
+
+          - alert: WorkloadAvailabilityBelow50
+            expr: |
+              (
+                (
+                  kube_deployment_status_replicas_available
+                  /
+                  kube_deployment_spec_replicas
+                ) < 0.5
+                and kube_deployment_spec_replicas > 0
+              )
+              * on(cluster, namespace, deployment)
+              (
+                max by (cluster, namespace, deployment) (
+                  label_replace(
+                    (
+                      namespace_workload_pod:kube_pod_owner:relabel
+                      * on(pod, namespace, cluster)
+                      group_left()
+                      kube_pod_labels{environment="prod", team="Fintech-Sre"}
+                    ),
+                    "deployment", "$1", "workload", "(.*)"
+                  )
+                )
+              )
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Deployment {{ $labels.namespace }}/{{ $labels.deployment }} 50%-dən aşağı available-dır!"
+              description: >-
+                Deployment {{ $labels.namespace }}/{{ $labels.deployment }}
+                availability is {{ $value | humanizePercentage }}.
+                Major service degradation!
+
+          - alert: StatefulSetAvailabilityBelow100
+            expr: |
+              (
+                (
+                  kube_statefulset_status_replicas_ready
+                  /
+                  kube_statefulset_replicas
+                ) < 1
+                and kube_statefulset_replicas > 0
+              )
+              * on(cluster, namespace, statefulset)
+              (
+                max by (cluster, namespace, statefulset) (
+                  label_replace(
+                    (
+                      namespace_workload_pod:kube_pod_owner:relabel
+                      * on(pod, namespace, cluster)
+                      group_left()
+                      kube_pod_labels{environment="prod", team="Fintech-Sre"}
+                    ),
+                    "statefulset", "$1", "workload", "(.*)"
+                  )
+                )
+              )
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "StatefulSet {{ $labels.namespace }}/{{ $labels.statefulset }} 100% ready deyil"
+              description: >-
+                StatefulSet {{ $labels.namespace }}/{{ $labels.statefulset }}
+                has {{ $value | humanizePercentage }} ready replicas.
+
+          - alert: WorkloadAvailabilityBelow75
+            expr: |
+              (
+                (
+                  kube_deployment_status_replicas_available
+                  /
+                  kube_deployment_spec_replicas
+                ) < 0.75
+                and kube_deployment_spec_replicas > 0
+              )
+              * on(cluster, namespace, deployment)
+              (
+                max by (cluster, namespace, deployment) (
+                  label_replace(
+                    (
+                      namespace_workload_pod:kube_pod_owner:relabel
+                      * on(pod, namespace, cluster)
+                      group_left()
+                      kube_pod_labels{environment="prod", team="Fintech-Sre"}
+                    ),
+                    "deployment", "$1", "workload", "(.*)"
+                  )
+                )
+              )
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Deployment {{ $labels.namespace }}/{{ $labels.deployment }} 75%-dən aşağı available-dır"
+              description: >-
+                Deployment {{ $labels.namespace }}/{{ $labels.deployment }}
+                availability is {{ $value | humanizePercentage }}.
+                Significant capacity loss — service degradation likely.
+
+          - alert: DeploymentCompleteOutage
+            expr: |
+              (
+                kube_deployment_status_replicas_available == 0
+                and
+                kube_deployment_spec_replicas > 0
+              )
+              * on(cluster, namespace, deployment)
+              (
+                max by (cluster, namespace, deployment) (
+                  label_replace(
+                    (
+                      namespace_workload_pod:kube_pod_owner:relabel
+                      * on(pod, namespace, cluster)
+                      group_left()
+                      kube_pod_labels{environment="prod", team="Fintech-Sre"}
+                    ),
+                    "deployment", "$1", "workload", "(.*)"
+                  )
+                )
+              )
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              summary: "OUTAGE: Deployment {{ $labels.namespace }}/{{ $labels.deployment }} tamamilə düşüb!"
+              description: >-
+                Deployment {{ $labels.namespace }}/{{ $labels.deployment }}
+                has 0 available replicas out of {{ $labels.deployment }}.
+                Complete service outage! Immediate action required.
+
+          - alert: DeploymentSingleReplicaNoRedundancy
+            expr: |
+              (
+                kube_deployment_status_replicas_available == 1
+                and
+                kube_deployment_spec_replicas > 1
+              )
+              * on(cluster, namespace, deployment)
+              (
+                max by (cluster, namespace, deployment) (
+                  label_replace(
+                    (
+                      namespace_workload_pod:kube_pod_owner:relabel
+                      * on(pod, namespace, cluster)
+                      group_left()
+                      kube_pod_labels{environment="prod", team="Fintech-Sre"}
+                    ),
+                    "deployment", "$1", "workload", "(.*)"
+                  )
+                )
+              )
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Deployment {{ $labels.namespace }}/{{ $labels.deployment }} yalnız 1 replica ilə işləyir — HA yoxdur"
+              description: >-
+                Deployment {{ $labels.namespace }}/{{ $labels.deployment }}
+                has only 1 available replica while desired is more.
+                No high-availability — any pod failure will cause outage.
+
+          - alert: DeploymentUnavailableReplicasHigh
+            expr: |
+              (
+                (
+                  kube_deployment_spec_replicas
+                  -
+                  kube_deployment_status_replicas_available
+                ) > 0
+                and
+                (
+                  (
+                    kube_deployment_spec_replicas
+                    -
+                    kube_deployment_status_replicas_available
+                  )
+                  /
+                  kube_deployment_spec_replicas
+                ) > 0.25
+                and kube_deployment_spec_replicas > 0
+              )
+              * on(cluster, namespace, deployment)
+              (
+                max by (cluster, namespace, deployment) (
+                  label_replace(
+                    (
+                      namespace_workload_pod:kube_pod_owner:relabel
+                      * on(pod, namespace, cluster)
+                      group_left()
+                      kube_pod_labels{environment="prod", team="Fintech-Sre"}
+                    ),
+                    "deployment", "$1", "workload", "(.*)"
+                  )
+                )
+              )
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Deployment {{ $labels.namespace }}/{{ $labels.deployment }} — 25%-dən çox replica unavailable"
+              description: >-
+                Deployment {{ $labels.namespace }}/{{ $labels.deployment }}
+                has {{ $value }} unavailable replicas (>25% of desired).
+                Partial degradation in progress.
+
+          - alert: DeploymentReplicaFlapping
+            expr: |
+              (
+                changes(kube_deployment_status_replicas_available[30m]) > 5
+                and
+                kube_deployment_spec_replicas > 0
+              )
+              * on(cluster, namespace, deployment)
+              (
+                max by (cluster, namespace, deployment) (
+                  label_replace(
+                    (
+                      namespace_workload_pod:kube_pod_owner:relabel
+                      * on(pod, namespace, cluster)
+                      group_left()
+                      kube_pod_labels{environment="prod", team="Fintech-Sre"}
+                    ),
+                    "deployment", "$1", "workload", "(.*)"
+                  )
+                )
+              )
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Deployment {{ $labels.namespace }}/{{ $labels.deployment }} replicas flapping edir"
+              description: >-
+                Deployment {{ $labels.namespace }}/{{ $labels.deployment }}
+                available replicas changed {{ $value }} times in the last 30 minutes.
+                Pods are constantly going up and down — unstable deployment.
+
+          - alert: StatefulSetAvailabilityBelow50
+            expr: |
+              (
+                (
+                  kube_statefulset_status_replicas_ready
+                  /
+                  kube_statefulset_replicas
+                ) < 0.5
+                and kube_statefulset_replicas > 0
+              )
+              * on(cluster, namespace, statefulset)
+              (
+                max by (cluster, namespace, statefulset) (
+                  label_replace(
+                    (
+                      namespace_workload_pod:kube_pod_owner:relabel
+                      * on(pod, namespace, cluster)
+                      group_left()
+                      kube_pod_labels{environment="prod", team="Fintech-Sre"}
+                    ),
+                    "statefulset", "$1", "workload", "(.*)"
+                  )
+                )
+              )
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "StatefulSet {{ $labels.namespace }}/{{ $labels.statefulset }} 50%-dən aşağı ready!"
+              description: >-
+                StatefulSet {{ $labels.namespace }}/{{ $labels.statefulset }}
+                has {{ $value | humanizePercentage }} ready replicas.
+                Critical data service degradation!
+
+          - alert: StatefulSetCompleteOutage
+            expr: |
+              (
+                kube_statefulset_status_replicas_ready == 0
+                and
+                kube_statefulset_replicas > 0
+              )
+              * on(cluster, namespace, statefulset)
+              (
+                max by (cluster, namespace, statefulset) (
+                  label_replace(
+                    (
+                      namespace_workload_pod:kube_pod_owner:relabel
+                      * on(pod, namespace, cluster)
+                      group_left()
+                      kube_pod_labels{environment="prod", team="Fintech-Sre"}
+                    ),
+                    "statefulset", "$1", "workload", "(.*)"
+                  )
+                )
+              )
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              summary: "OUTAGE: StatefulSet {{ $labels.namespace }}/{{ $labels.statefulset }} tamamilə düşüb!"
+              description: >-
+                StatefulSet {{ $labels.namespace }}/{{ $labels.statefulset }}
+                has 0 ready replicas. Complete outage of stateful service!
+
+          - alert: DaemonSetAvailabilityBelow100
+            expr: |
+              (
+                (
+                  kube_daemonset_status_number_ready
+                  /
+                  kube_daemonset_status_desired_number_scheduled
+                ) < 1
+                and kube_daemonset_status_desired_number_scheduled > 0
+              )
+              * on(cluster, namespace, daemonset)
+              (
+                max by (cluster, namespace, daemonset) (
+                  label_replace(
+                    (
+                      namespace_workload_pod:kube_pod_owner:relabel
+                      * on(pod, namespace, cluster)
+                      group_left()
+                      kube_pod_labels{environment="prod", team="Fintech-Sre"}
+                    ),
+                    "daemonset", "$1", "workload", "(.*)"
+                  )
+                )
+              )
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "DaemonSet {{ $labels.namespace }}/{{ $labels.daemonset }} 100% ready deyil"
+              description: >-
+                DaemonSet {{ $labels.namespace }}/{{ $labels.daemonset }}
+                has {{ $value | humanizePercentage }} ready pods.
+                Some nodes are not running this workload.
+
+          - alert: DaemonSetAvailabilityBelow50
+            expr: |
+              (
+                (
+                  kube_daemonset_status_number_ready
+                  /
+                  kube_daemonset_status_desired_number_scheduled
+                ) < 0.5
+                and kube_daemonset_status_desired_number_scheduled > 0
+              )
+              * on(cluster, namespace, daemonset)
+              (
+                max by (cluster, namespace, daemonset) (
+                  label_replace(
+                    (
+                      namespace_workload_pod:kube_pod_owner:relabel
+                      * on(pod, namespace, cluster)
+                      group_left()
+                      kube_pod_labels{environment="prod", team="Fintech-Sre"}
+                    ),
+                    "daemonset", "$1", "workload", "(.*)"
+                  )
+                )
+              )
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "DaemonSet {{ $labels.namespace }}/{{ $labels.daemonset }} 50%-dən aşağı ready!"
+              description: >-
+                DaemonSet {{ $labels.namespace }}/{{ $labels.daemonset }}
+                has {{ $value | humanizePercentage }} ready pods.
+                Critical — more than half of nodes are missing this workload.
+
+          - alert: MultipleContainersOOMInNamespace
+            expr: |
+              count by (namespace) (
+                (
+                  kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
+                  and on(namespace, pod, container)
+                  increase(kube_pod_container_status_restarts_total[1h]) > 0
+                )
+                * on(namespace, pod, cluster) group_left()
+                kube_pod_labels{environment="prod", team="Fintech-Sre"}
+              ) > 2
+            for: 0m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Namespace {{ $labels.namespace }}-da çoxlu container OOMKilled olur"
+              description: >-
+                {{ $value }} containers in namespace {{ $labels.namespace }}
+                have been OOMKilled in the last hour.
+                Cluster-wide memory pressure or misconfigured limits.
+
+          - alert: RolloutRestartLoop
+            expr: |
+              (
+                count by (namespace, pod) (
+                  increase(kube_pod_container_status_restarts_total[15m]) > 3
+                ) > 0
+                and on(namespace, pod) (
+                  kube_pod_status_phase{phase="Running"} == 1
+                )
+              )
+              * on(namespace, pod) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "[{{ $labels.team }}/{{ $labels.squad }}] Pod {{ $labels.namespace }}/{{ $labels.pod }} restart loop-dadır"
+              description: >-
+                Pod {{ $labels.namespace }}/{{ $labels.pod }}
+                is in a rapid restart loop (>3 restarts in 15 min).
+                Team: {{ $labels.team }}, Env: {{ $labels.environment }}.
+
+      # ================================================================
+      #  16. CONTAINER RESOURCE EFFICIENCY
+      # ================================================================
+      - name: resource-efficiency
+        rules:
+          - alert: ContainerCPUUsageTooLow
+            expr: |
+              (
+                (
+                  sum by (namespace, pod, container) (rate(container_cpu_usage_seconds_total{container!="", image!=""}[30m]))
+                  /
+                  sum by (namespace, pod, container) (kube_pod_container_resource_requests{resource="cpu"})
+                ) < 0.1
+                and sum by (namespace, pod, container) (kube_pod_container_resource_requests{resource="cpu"}) > 0
+              )
+              * on(namespace, pod) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 6h
+            labels:
+              severity: info
+            annotations:
+              summary: "Container {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} CPU istifadəsi çox aşağıdır"
+              description: >-
+                Container {{ $labels.container }} in pod
+                {{ $labels.namespace }}/{{ $labels.pod }}
+                is using only {{ $value | humanizePercentage }} of its CPU request
+                for more than 6 hours. Consider reducing CPU requests to save cost.
+
+          - alert: ContainerMemoryUsageTooLow
+            expr: |
+              (
+                (
+                  sum by (namespace, pod, container) (container_memory_working_set_bytes{container!="", image!=""})
+                  /
+                  sum by (namespace, pod, container) (kube_pod_container_resource_requests{resource="memory"})
+                ) < 0.2
+                and sum by (namespace, pod, container) (kube_pod_container_resource_requests{resource="memory"}) > 0
+              )
+              * on(namespace, pod) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 6h
+            labels:
+              severity: info
+            annotations:
+              summary: "Container {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} memory istifadəsi çox aşağıdır"
+              description: >-
+                Container {{ $labels.container }} in pod
+                {{ $labels.namespace }}/{{ $labels.pod }}
+                is using only {{ $value | humanizePercentage }} of its memory request
+                for more than 6 hours. Consider reducing memory requests to save cost.
+
+          - alert: ContainerCPUSpiking
+            expr: |
+              (
+                (
+                  rate(container_cpu_usage_seconds_total{container!="", image!=""}[2m])
+                  /
+                  rate(container_cpu_usage_seconds_total{container!="", image!=""}[30m])
+                ) > 5
+                and rate(container_cpu_usage_seconds_total{container!="", image!=""}[30m]) > 0
+              )
+              * on(namespace, pod) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: info
+            annotations:
+              summary: "Container {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} CPU spike"
+              description: >-
+                Container {{ $labels.container }} in pod
+                {{ $labels.namespace }}/{{ $labels.pod }}
+                CPU usage has spiked {{ $value | printf "%.1f" }}x above its 30-minute average.
+
+          - alert: ContainerMemorySpiking
+            expr: |
+              (
+                (
+                  container_memory_working_set_bytes{container!="", image!=""}
+                  /
+                  avg_over_time(container_memory_working_set_bytes{container!="", image!=""}[1h])
+                ) > 2
+                and avg_over_time(container_memory_working_set_bytes{container!="", image!=""}[1h]) > 0
+              )
+              * on(namespace, pod) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Container {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} memory spike"
+              description: >-
+                Container {{ $labels.container }} in pod
+                {{ $labels.namespace }}/{{ $labels.pod }}
+                memory usage is {{ $value | printf "%.1f" }}x above its 1-hour average.
+                Possible memory leak.
+
+          - alert: PossibleMemoryLeak
+            expr: |
+              (
+                (
+                  container_memory_working_set_bytes{container!="", image!=""}
+                  -
+                  container_memory_working_set_bytes{container!="", image!=""} offset 1h
+                )
+                /
+                container_memory_working_set_bytes{container!="", image!=""} offset 1h
+                > 0.3
+                and container_memory_working_set_bytes{container!="", image!=""} offset 1h > 0
+              )
+              * on(namespace, pod) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 2h
+            labels:
+              severity: warning
+            annotations:
+              summary: "Container {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} memory leak ehtimalı"
+              description: >-
+                Container {{ $labels.container }} in pod
+                {{ $labels.namespace }}/{{ $labels.pod }}
+                memory has been growing consistently (>30% per hour)
+                for the last 2 hours. Possible memory leak.
+
+      # ================================================================
+      #  17. NODE CAPACITY PLANNING
+      # ================================================================
+      - name: node-capacity
+        rules:
+          - alert: NodeCPUAllocatableExhausted
+            expr: |
+              (
+                (
+                  1 - (
+                    sum by (node, cluster) (kube_node_status_allocatable{resource="cpu"})
+                    -
+                    sum by (node, cluster) (kube_pod_container_resource_requests{resource="cpu"})
+                  )
+                  /
+                  sum by (node, cluster) (kube_node_status_allocatable{resource="cpu"})
+                ) > 0.9
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Node {{ $labels.node }} CPU allocatable tükənir"
+              description: >-
+                Node {{ $labels.node }} has {{ $value | humanizePercentage }}
+                of its allocatable CPU claimed by pod requests.
+                New pods may fail to schedule.
+
+          - alert: NodeMemoryAllocatableExhausted
+            expr: |
+              (
+                (
+                  1 - (
+                    sum by (node, cluster) (kube_node_status_allocatable{resource="memory"})
+                    -
+                    sum by (node, cluster) (kube_pod_container_resource_requests{resource="memory"})
+                  )
+                  /
+                  sum by (node, cluster) (kube_node_status_allocatable{resource="memory"})
+                ) > 0.9
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Node {{ $labels.node }} memory allocatable tükənir"
+              description: >-
+                Node {{ $labels.node }} has {{ $value | humanizePercentage }}
+                of its allocatable memory claimed by pod requests.
+
+          - alert: ClusterCPUCapacityLow
+            expr: |
+              (
+                (
+                  sum by (cluster) (kube_pod_container_resource_requests{resource="cpu"})
+                  /
+                  sum by (cluster) (kube_node_status_allocatable{resource="cpu"})
+                ) > 0.85
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 30m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Cluster CPU kapasitəsi aşağıdır"
+              description: >-
+                Cluster-wide CPU request utilization is
+                {{ $value | humanizePercentage }}.
+                Consider adding more nodes or optimizing workloads.
+
+          - alert: ClusterMemoryCapacityLow
+            expr: |
+              (
+                (
+                  sum by (cluster) (kube_pod_container_resource_requests{resource="memory"})
+                  /
+                  sum by (cluster) (kube_node_status_allocatable{resource="memory"})
+                ) > 0.85
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 30m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Cluster memory kapasitəsi aşağıdır"
+              description: >-
+                Cluster-wide memory request utilization is
+                {{ $value | humanizePercentage }}.
+                Consider adding more nodes or optimizing workloads.
+
+          - alert: ClusterNodeCountDrop
+            expr: |
+              (
+                count by (cluster) (kube_node_info)
+                <
+                count by (cluster) (kube_node_info offset 1h)
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Cluster node sayı azalıb"
+              description: >-
+                Cluster has fewer nodes than 1 hour ago.
+                Current: {{ $value }} nodes. A node may have been removed
+                or became unresponsive.
+
+      # ================================================================
+      #  18. CONFIGMAP / SECRET HEALTH
+      # ================================================================
+      - name: configmap-secret-health
+        rules:
+          - alert: ConfigMapTooLarge
+            expr: |
+              (
+                kube_configmap_metadata_resource_version > 0
+                and on(namespace, configmap)
+                (
+                  kube_configmap_info * 0 + 1
+                )
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 0m
+            labels:
+              severity: info
+            annotations:
+              summary: "ConfigMap {{ $labels.namespace }}/{{ $labels.configmap }} mövcuddur"
+              description: "Monitoring ConfigMap health."
+
+          - alert: TooManySecretsInNamespace
+            expr: |
+              (
+                count by (namespace, cluster) (kube_secret_info) > 100
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 1h
+            labels:
+              severity: info
+            annotations:
+              summary: "Namespace {{ $labels.namespace }}-da çoxlu secret var ({{ $value }})"
+              description: >-
+                Namespace {{ $labels.namespace }} has {{ $value }} secrets.
+                Consider cleaning up unused secrets to reduce API server load.
+
+          - alert: TooManyConfigMapsInNamespace
+            expr: |
+              (
+                count by (namespace, cluster) (kube_configmap_info) > 100
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 1h
+            labels:
+              severity: info
+            annotations:
+              summary: "Namespace {{ $labels.namespace }}-da çoxlu configmap var ({{ $value }})"
+              description: >-
+                Namespace {{ $labels.namespace }} has {{ $value }} configmaps.
+                Consider cleaning up unused configmaps.
+
+      # ================================================================
+      #  19. REPLICASET HEALTH
+      # ================================================================
+      - name: replicaset-health
+        rules:
+          - alert: ReplicaSetStaleRevisions
+            expr: |
+              (
+                count by (namespace, cluster) (
+                  kube_replicaset_spec_replicas == 0
+                ) > 20
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 1h
+            labels:
+              severity: info
+            annotations:
+              summary: "Namespace {{ $labels.namespace }}-da {{ $value }} köhnə ReplicaSet var"
+              description: >-
+                Namespace {{ $labels.namespace }} has {{ $value }}
+                ReplicaSets with 0 desired replicas (old revisions).
+                Consider setting revisionHistoryLimit on Deployments.
+
+          - alert: ReplicaSetReplicaMismatch
+            expr: |
+              (
+                kube_replicaset_spec_replicas
+                !=
+                kube_replicaset_status_ready_replicas
+                and kube_replicaset_spec_replicas > 0
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "ReplicaSet {{ $labels.namespace }}/{{ $labels.replicaset }} replica uyğunsuzluğu"
+              description: >-
+                ReplicaSet {{ $labels.namespace }}/{{ $labels.replicaset }}
+                desired {{ $value }} replicas but not all are ready.
+
+      # ================================================================
+      #  20. API SERVER & ETCD (if metrics exposed)
+      # ================================================================
+      - name: apiserver-health
+        rules:
+          - alert: KubeAPIServerDown
+            expr: |
+              (up{job="kubernetes-apiservers"} == 0)
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Kube API Server down-dır"
+              description: >-
+                Kubernetes API server is not responding.
+                Cluster management operations will fail.
+
+          - alert: KubeAPIServerHighLatency
+            expr: |
+              (
+                histogram_quantile(0.99,
+                  sum by (le, verb, resource, cluster) (
+                    rate(apiserver_request_duration_seconds_bucket{verb!="WATCH"}[5m])
+                  )
+                ) > 3
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Kube API Server latency yüksəkdir"
+              description: >-
+                API server {{ $labels.verb }} requests for {{ $labels.resource }}
+                have p99 latency of {{ $value | printf "%.1f" }}s.
+
+          - alert: KubeAPIServerErrorRate
+            expr: |
+              (
+                sum by (verb, cluster) (
+                  rate(apiserver_request_total{code=~"5.."}[5m])
+                )
+                /
+                sum by (verb, cluster) (
+                  rate(apiserver_request_total[5m])
+                ) > 0.05
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Kube API Server error rate yüksəkdir"
+              description: >-
+                API server {{ $labels.verb }} requests have
+                {{ $value | humanizePercentage }} error rate (5xx).
+
+          - alert: KubeClientCertExpiringSoon
+            expr: |
+              (
+                apiserver_client_certificate_expiration_seconds_count > 0
+                and on()
+                histogram_quantile(0.01, sum by (le) (
+                  rate(apiserver_client_certificate_expiration_seconds_bucket[5m])
+                )) < 604800
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 1h
+            labels:
+              severity: critical
+            annotations:
+              summary: "Kubernetes client sertifikatı tezliklə bitir"
+              description: >-
+                A Kubernetes client certificate will expire in less than 7 days.
+                Rotate certificates immediately.
+
+          - alert: EtcdHighCommitDuration
+            expr: |
+              (
+                histogram_quantile(0.99,
+                  rate(etcd_disk_backend_commit_duration_seconds_bucket[5m])
+                ) > 0.25
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "etcd disk commit müddəti yüksəkdir"
+              description: >-
+                etcd p99 backend commit duration is {{ $value | printf "%.3f" }}s.
+                Slow disk I/O may affect cluster performance.
+
+          - alert: EtcdHighFsyncDuration
+            expr: |
+              (
+                histogram_quantile(0.99,
+                  rate(etcd_disk_wal_fsync_duration_seconds_bucket[5m])
+                ) > 0.5
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "etcd WAL fsync müddəti yüksəkdir"
+              description: >-
+                etcd p99 WAL fsync duration is {{ $value | printf "%.3f" }}s.
+                Slow disk may lead to leader election issues.
+
+          - alert: EtcdInsufficientMembers
+            expr: |
+              (
+                count by (cluster) (etcd_server_has_leader)
+                <
+                2
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "etcd cluster-da kifayət qədər member yoxdur"
+              description: >-
+                etcd cluster has fewer than 2 members with a leader.
+                Quorum may be lost. Cluster data is at risk!
+
+          - alert: EtcdLeaderChanges
+            expr: |
+              (increase(etcd_server_leader_changes_seen_total[1h]) > 3)
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 0m
+            labels:
+              severity: warning
+            annotations:
+              summary: "etcd leader tez-tez dəyişir"
+              description: >-
+                etcd has seen {{ $value | printf "%.0f" }} leader changes
+                in the last hour. This indicates instability —
+                possible network partitions or resource starvation.
+
+          - alert: EtcdHighNumberOfFailedProposals
+            expr: |
+              (increase(etcd_server_proposals_failed_total[1h]) > 5)
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 0m
+            labels:
+              severity: warning
+            annotations:
+              summary: "etcd proposal-lar uğursuz olur"
+              description: >-
+                etcd has {{ $value | printf "%.0f" }} failed proposals
+                in the last hour. Leader may be losing quorum.
+
+          - alert: EtcdDatabaseSizeLarge
+            expr: |
+              (etcd_mvcc_db_total_size_in_bytes > 6 * 1024 * 1024 * 1024)
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "etcd database ölçüsü böyükdür (>6GB)"
+              description: >-
+                etcd database is {{ $value | humanize1024 }}B.
+                Default limit is 8GB. Consider compaction and defrag.
+
+      # ================================================================
+      #  21. KUBELET HEALTH
+      # ================================================================
+      - name: kubelet-health
+        rules:
+          - alert: KubeletDown
+            expr: |
+              (up{job="kubelet"} == 0)
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Kubelet {{ $labels.instance }} down-dır"
+              description: >-
+                Kubelet on {{ $labels.instance }} is not responding.
+                Pods on this node cannot be managed.
+
+          - alert: KubeletTooManyPods
+            expr: |
+              (kubelet_running_pods > 100)
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Kubelet {{ $labels.instance }}-da çoxlu pod çalışır"
+              description: >-
+                Kubelet on {{ $labels.instance }} is running {{ $value }}
+                pods. Default limit is 110.
+
+          - alert: KubeletPLEGDurationHigh
+            expr: |
+              (
+                histogram_quantile(0.99,
+                  sum by (instance, le, cluster) (
+                    rate(kubelet_pleg_relist_duration_seconds_bucket[5m])
+                  )
+                ) > 10
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Kubelet {{ $labels.instance }} PLEG relist yavaşdır"
+              description: >-
+                Kubelet PLEG (Pod Lifecycle Event Generator) relist
+                p99 duration is {{ $value | printf "%.1f" }}s on {{ $labels.instance }}.
+                This can cause pod status updates to be delayed.
+
+          - alert: KubeletPodStartLatencyHigh
+            expr: |
+              (
+                histogram_quantile(0.99,
+                  sum by (instance, le, cluster) (
+                    rate(kubelet_pod_worker_duration_seconds_bucket{operation_type="sync"}[5m])
+                  )
+                ) > 60
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Kubelet {{ $labels.instance }} pod start latency yüksəkdir"
+              description: >-
+                Kubelet p99 pod sync duration is {{ $value | printf "%.1f" }}s
+                on {{ $labels.instance }}. Pods may take too long to start.
+
+          - alert: KubeletRuntimeErrors
+            expr: |
+              (increase(kubelet_runtime_operations_errors_total[5m]) > 0)
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Kubelet {{ $labels.instance }} runtime xətaları var"
+              description: >-
+                Kubelet on {{ $labels.instance }} is experiencing
+                container runtime errors ({{ $labels.operation_type }}).
+                {{ $value | printf "%.0f" }} errors in the last 5 minutes.
+
+          - alert: KubeletCertificateExpiringSoon
+            expr: |
+              (kubelet_certificate_manager_server_ttl_seconds < 604800)
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 1h
+            labels:
+              severity: critical
+            annotations:
+              summary: "Kubelet {{ $labels.instance }} sertifikatı tezliklə bitir"
+              description: >-
+                Kubelet server certificate on {{ $labels.instance }}
+                will expire in less than 7 days
+                ({{ $value | printf "%.0f" }} seconds remaining).
+
+          - alert: KubeletVolumePluginErrors
+            expr: |
+              increase(kubelet_volume_stats_health_abnormal[5m]) > 0
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Kubelet {{ $labels.instance }} volume health problemi"
+              description: >-
+                Kubelet on {{ $labels.instance }} reports unhealthy volumes.
+                Check PVCs and storage backend.
+
+      # ================================================================
+      #  22. COREDNS / DNS HEALTH
+      # ================================================================
+      - name: dns-health
+        rules:
+          - alert: CoreDNSDown
+            expr: |
+              (up{job="coredns"} == 0 or up{job="kube-dns"} == 0)
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "CoreDNS down-dır"
+              description: >-
+                CoreDNS is not responding for more than 5 minutes.
+                Service discovery via DNS will not work. All services affected!
+
+          - alert: CoreDNSHighErrorRate
+            expr: |
+              (
+                (
+                  sum by (instance, cluster) (rate(coredns_dns_responses_total{rcode="SERVFAIL"}[5m]))
+                  /
+                  sum by (instance, cluster) (rate(coredns_dns_responses_total[5m]))
+                ) > 0.05
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "CoreDNS SERVFAIL rate yüksəkdir"
+              description: >-
+                CoreDNS instance {{ $labels.instance }} has
+                {{ $value | humanizePercentage }} SERVFAIL response rate.
+                DNS resolution may be failing for some services.
+
+          - alert: CoreDNSHighLatency
+            expr: |
+              (
+                histogram_quantile(0.99,
+                  sum by (le, server, cluster) (
+                    rate(coredns_dns_request_duration_seconds_bucket[5m])
+                  )
+                ) > 0.5
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "CoreDNS latency yüksəkdir"
+              description: >-
+                CoreDNS p99 request duration is {{ $value | printf "%.3f" }}s.
+                Slow DNS can cause application timeouts.
+
+          - alert: CoreDNSForwardErrors
+            expr: |
+              (increase(coredns_forward_responses_total{rcode="SERVFAIL"}[5m]) > 10)
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "CoreDNS forward xətaları var"
+              description: >-
+                CoreDNS upstream forward is returning SERVFAIL.
+                {{ $value | printf "%.0f" }} errors in 5 minutes.
+                Check upstream DNS servers.
+
+          - alert: CoreDNSPanicCount
+            expr: |
+              (increase(coredns_panics_total[5m]) > 0)
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 0m
+            labels:
+              severity: critical
+            annotations:
+              summary: "CoreDNS panic baş verib!"
+              description: >-
+                CoreDNS experienced {{ $value | printf "%.0f" }} panics
+                in the last 5 minutes. DNS service may be unstable.
+
+      # ================================================================
+      #  23. POD DISRUPTION BUDGET (PDB)
+      # ================================================================
+      - name: pdb-alerts
+        rules:
+          - alert: PDBDisruptionsBlocked
+            expr: |
+              (
+                kube_poddisruptionbudget_status_current_healthy
+                <
+                kube_poddisruptionbudget_status_desired_healthy
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "PDB {{ $labels.namespace }}/{{ $labels.poddisruptionbudget }} — healthy pod sayı az"
+              description: >-
+                PDB {{ $labels.namespace }}/{{ $labels.poddisruptionbudget }}
+                has {{ $value }} healthy pods, which is below the desired healthy count.
+                Voluntary disruptions (node drain, rolling updates) are blocked.
+
+          - alert: PDBAtMinAvailable
+            expr: |
+              (
+                kube_poddisruptionbudget_status_current_healthy
+                ==
+                kube_poddisruptionbudget_status_desired_healthy
+                and kube_poddisruptionbudget_status_expected_pods > kube_poddisruptionbudget_status_desired_healthy
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 30m
+            labels:
+              severity: info
+            annotations:
+              summary: "PDB {{ $labels.namespace }}/{{ $labels.poddisruptionbudget }} minimum-da"
+              description: >-
+                PDB {{ $labels.namespace }}/{{ $labels.poddisruptionbudget }}
+                is at exactly the minimum healthy threshold.
+                Any additional pod failure will block disruptions.
+
+          - alert: PDBNoDisruptionsAllowed
+            expr: |
+              (kube_poddisruptionbudget_status_pod_disruptions_allowed == 0)
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "PDB {{ $labels.namespace }}/{{ $labels.poddisruptionbudget }} — disruption icazəsi yoxdur"
+              description: >-
+                PDB {{ $labels.namespace }}/{{ $labels.poddisruptionbudget }}
+                allows 0 disruptions for more than 15 minutes.
+                Node drains and rolling updates will be blocked.
+
+      # ================================================================
+      #  24. CONTAINER FILESYSTEM
+      # ================================================================
+      - name: container-filesystem
+        rules:
+          - alert: ContainerRootfsUsageHigh
+            expr: |
+              (
+                (
+                  container_fs_usage_bytes{container!="", device=~"/dev/.*"}
+                  /
+                  container_fs_limit_bytes{container!="", device=~"/dev/.*"}
+                ) > 0.85
+                and container_fs_limit_bytes{container!="", device=~"/dev/.*"} > 0
+              )
+              * on(namespace, pod) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Container {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} rootfs dolur"
+              description: >-
+                Container {{ $labels.container }} in pod
+                {{ $labels.namespace }}/{{ $labels.pod }}
+                rootfs is {{ $value | humanizePercentage }} full.
+
+          - alert: ContainerRootfsUsageCritical
+            expr: |
+              (
+                (
+                  container_fs_usage_bytes{container!="", device=~"/dev/.*"}
+                  /
+                  container_fs_limit_bytes{container!="", device=~"/dev/.*"}
+                ) > 0.95
+                and container_fs_limit_bytes{container!="", device=~"/dev/.*"} > 0
+              )
+              * on(namespace, pod) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Container {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} rootfs demək olar doludur!"
+              description: >-
+                Container {{ $labels.container }} in pod
+                {{ $labels.namespace }}/{{ $labels.pod }}
+                rootfs is {{ $value | humanizePercentage }} full.
+                Container may crash if filesystem fills up completely.
+
+          - alert: ContainerWriteIOHigh
+            expr: |
+              (
+                sum by (namespace, pod, container) (
+                  rate(container_fs_writes_bytes_total{container!="", image!=""}[5m])
+                ) > 50 * 1024 * 1024
+              )
+              * on(namespace, pod) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 15m
+            labels:
+              severity: info
+            annotations:
+              summary: "Container {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} yüksək disk write"
+              description: >-
+                Container {{ $labels.container }} in pod
+                {{ $labels.namespace }}/{{ $labels.pod }}
+                is writing {{ $value | humanize }}B/s to disk.
+                Check for excessive logging or temp file creation.
+
+      # ================================================================
+      #  25. SCHEDULER & CONTROLLER MANAGER
+      # ================================================================
+      - name: control-plane-health
+        rules:
+          - alert: KubeSchedulerDown
+            expr: |
+              (up{job="kube-scheduler"} == 0)
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Kube Scheduler down-dır"
+              description: >-
+                Kubernetes scheduler is not responding.
+                New pods cannot be assigned to nodes.
+
+          - alert: KubeControllerManagerDown
+            expr: |
+              (up{job="kube-controller-manager"} == 0)
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Kube Controller Manager down-dır"
+              description: >-
+                Kubernetes controller manager is not responding.
+                Deployments, ReplicaSets, and other controllers cannot reconcile.
+
+          - alert: SchedulerBindingLatencyHigh
+            expr: |
+              (
+                histogram_quantile(0.99,
+                  sum by (le, cluster) (
+                    rate(scheduler_binding_duration_seconds_bucket[5m])
+                  )
+                ) > 1
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Scheduler binding latency yüksəkdir"
+              description: >-
+                Scheduler p99 binding duration is {{ $value | printf "%.1f" }}s.
+                Pod scheduling may be delayed.
+
+          - alert: SchedulerSchedulingLatencyHigh
+            expr: |
+              (
+                histogram_quantile(0.99,
+                  sum by (le, cluster) (
+                    rate(scheduler_scheduling_algorithm_duration_seconds_bucket[5m])
+                  )
+                ) > 0.5
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Scheduler algorithm latency yüksəkdir"
+              description: >-
+                Scheduler p99 algorithm duration is {{ $value | printf "%.1f" }}s.
+                Too many nodes or complex affinity rules may be the cause.
+
+          - alert: SchedulerPendingPodsHigh
+            expr: |
+              (scheduler_pending_pods > 10)
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Scheduler-da çoxlu pending pod var"
+              description: >-
+                Scheduler has {{ $value }} pending pods in queue
+                for more than 10 minutes. Cluster may lack resources.
+
+          - alert: SchedulerPreemptionVictims
+            expr: |
+              (increase(scheduler_preemption_victims[1h]) > 10)
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 0m
+            labels:
+              severity: info
+            annotations:
+              summary: "Scheduler çoxlu preemption edir"
+              description: >-
+                Scheduler has preempted {{ $value | printf "%.0f" }} pods
+                in the last hour. Higher-priority workloads are displacing others.
+
+      # ================================================================
+      #  26. POD SECURITY & COMPLIANCE
+      # ================================================================
+      - name: pod-security
+        rules:
+          - alert: PrivilegedContainerRunning
+            expr: |
+              (
+                kube_pod_container_status_running == 1
+                and on(namespace, pod, container)
+                kube_pod_container_info{container!=""}
+                and on(namespace, pod)
+                kube_pod_spec_volumes_hostpaths_readonly{} == 0
+              )
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 0m
+            labels:
+              severity: info
+            annotations:
+              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} host path ilə çalışır"
+              description: >-
+                Pod {{ $labels.namespace }}/{{ $labels.pod }}
+                has a writable hostPath volume mounted.
+                This could be a security risk.
+
+          - alert: PodUsingHostNetwork
+            expr: |
+              (
+                kube_pod_spec_volumes_hostpaths_readonly == 0
+                and on(namespace, pod)
+                kube_pod_status_phase{phase="Running"} == 1
+              )
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 0m
+            labels:
+              severity: info
+            annotations:
+              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} host path istifadə edir"
+              description: >-
+                Pod {{ $labels.namespace }}/{{ $labels.pod }}
+                uses writable host paths. Review for security compliance.
+
+          - alert: ContainerRunningAsRoot
+            expr: |
+              (
+                kube_pod_container_status_running == 1
+                unless on(namespace, pod)
+                kube_pod_spec_volumes_hostpaths_readonly
+              )
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 0m
+            labels:
+              severity: info
+            annotations:
+              summary: "Security audit: {{ $labels.namespace }}/{{ $labels.pod }} yoxlanılmalıdır"
+              description: >-
+                Review pod {{ $labels.namespace }}/{{ $labels.pod }}
+                security context settings. Ensure runAsNonRoot and
+                readOnlyRootFilesystem are set where applicable.
+
+      # ================================================================
+      #  27. INGRESS CONTROLLER (Nginx/Traefik)
+      # ================================================================
+      - name: ingress-controller
+        rules:
+          - alert: NginxIngressHighErrorRate
+            expr: |
+              (
+                (
+                  sum by (namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_requests{status=~"5.."}[5m])
+                  )
+                  /
+                  sum by (namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_requests[5m])
+                  )
+                ) > 0.05
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Ingress {{ $labels.namespace }}/{{ $labels.ingress }} 5xx error rate yüksəkdir"
+              description: >-
+                Ingress {{ $labels.host }} ({{ $labels.namespace }}/{{ $labels.ingress }})
+                has {{ $value | humanizePercentage }} 5xx error rate.
+
+          - alert: NginxIngressHigh4xxRate
+            expr: |
+              (
+                (
+                  sum by (namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_requests{status=~"4.."}[5m])
+                  )
+                  /
+                  sum by (namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_requests[5m])
+                  )
+                ) > 0.2
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Ingress {{ $labels.namespace }}/{{ $labels.ingress }} 4xx rate yüksəkdir"
+              description: >-
+                Ingress {{ $labels.host }} ({{ $labels.namespace }}/{{ $labels.ingress }})
+                has {{ $value | humanizePercentage }} 4xx error rate.
+                Possible broken clients or incorrect routing.
+
+          - alert: NginxIngressHighLatency
+            expr: |
+              (
+                histogram_quantile(0.99,
+                  sum by (le, namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_request_duration_seconds_bucket[5m])
+                  )
+                ) > 5
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Ingress {{ $labels.namespace }}/{{ $labels.ingress }} latency yüksəkdir"
+              description: >-
+                Ingress {{ $labels.host }} p99 latency is {{ $value | printf "%.1f" }}s.
+                Backend services may be slow or overloaded.
+
+          - alert: NginxIngressConfigReloadFailed
+            expr: |
+              (nginx_ingress_controller_config_last_reload_successful == 0)
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Nginx Ingress Controller config reload uğursuz olub"
+              description: >-
+                Nginx Ingress Controller failed to reload its configuration.
+                New Ingress rules may not be applied.
+
+          - alert: NginxIngressSSLCertExpiringSoon
+            expr: |
+              (
+                (
+                  nginx_ingress_controller_ssl_expire_time_seconds - time()
+                ) < 7 * 24 * 3600
+                and nginx_ingress_controller_ssl_expire_time_seconds > 0
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 1h
+            labels:
+              severity: critical
+            annotations:
+              summary: "SSL sertifikat {{ $labels.host }} tezliklə bitəcək"
+              description: >-
+                SSL certificate for {{ $labels.host }} will expire in
+                {{ $value | printf "%.0f" | humanizeDuration }}.
+                Renew the certificate immediately.
+
+          - alert: NginxIngressSSLCertExpiring30Days
+            expr: |
+              (
+                (
+                  nginx_ingress_controller_ssl_expire_time_seconds - time()
+                ) < 30 * 24 * 3600
+                and (
+                  nginx_ingress_controller_ssl_expire_time_seconds - time()
+                ) > 7 * 24 * 3600
+                and nginx_ingress_controller_ssl_expire_time_seconds > 0
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 1h
+            labels:
+              severity: warning
+            annotations:
+              summary: "SSL sertifikat {{ $labels.host }} 30 gün ərzində bitəcək"
+              description: >-
+                SSL certificate for {{ $labels.host }} will expire in less than 30 days.
+                Plan certificate renewal.
+
+      # ================================================================
+      #  28. CERT-MANAGER (if installed)
+      # ================================================================
+      - name: cert-manager-alerts
+        rules:
+          - alert: CertManagerCertExpiringSoon
+            expr: |
+              (certmanager_certificate_expiration_timestamp_seconds - time() < 14 * 24 * 3600)
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 1h
+            labels:
+              severity: critical
+            annotations:
+              summary: "cert-manager: {{ $labels.namespace }}/{{ $labels.name }} sertifikat 14 gün ərzində bitir"
+              description: >-
+                Certificate {{ $labels.namespace }}/{{ $labels.name }}
+                will expire in less than 14 days.
+                cert-manager should auto-renew — check for renewal failures.
+
+          - alert: CertManagerCertNotReady
+            expr: |
+              (certmanager_certificate_ready_status{condition="True"} == 0)
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "cert-manager: {{ $labels.namespace }}/{{ $labels.name }} sertifikat ready deyil"
+              description: >-
+                Certificate {{ $labels.namespace }}/{{ $labels.name }}
+                is not in Ready state for more than 15 minutes.
+                Check cert-manager logs and certificate events.
+
+          - alert: CertManagerRenewalFailure
+            expr: |
+              (
+                increase(certmanager_certificate_renewal_timestamp_seconds[1h]) == 0
+                and certmanager_certificate_expiration_timestamp_seconds - time() < 30 * 24 * 3600
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 1h
+            labels:
+              severity: warning
+            annotations:
+              summary: "cert-manager: {{ $labels.namespace }}/{{ $labels.name }} renewal uğursuz"
+              description: >-
+                Certificate {{ $labels.namespace }}/{{ $labels.name }}
+                has not been renewed and will expire within 30 days.
+
+      # ================================================================
+      #  29. CLUSTER AUTOSCALER (if installed)
+      # ================================================================
+      - name: cluster-autoscaler
+        rules:
+          - alert: ClusterAutoscalerUnschedulablePods
+            expr: |
+              cluster_autoscaler_unschedulable_pods_count > 0
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Cluster Autoscaler: {{ $value }} unschedulable pod var"
+              description: >-
+                There are {{ $value }} unschedulable pods that the
+                cluster autoscaler has not been able to resolve.
+                May have hit maximum node count or unsatisfiable constraints.
+
+          - alert: ClusterAutoscalerNodeGroupAtMax
+            expr: |
+              cluster_autoscaler_nodes_count
+              ==
+              cluster_autoscaler_max_nodes_count
+            for: 30m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Cluster Autoscaler: node group max-a çatıb"
+              description: >-
+                Cluster autoscaler node group is at maximum capacity
+                ({{ $value }} nodes) for more than 30 minutes.
+                Consider increasing the max node count.
+
+          - alert: ClusterAutoscalerScaleUpFailed
+            expr: |
+              increase(cluster_autoscaler_failed_scale_ups_total[1h]) > 0
+            for: 0m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Cluster Autoscaler: scale-up uğursuz olub"
+              description: >-
+                Cluster autoscaler failed to scale up
+                {{ $value | printf "%.0f" }} times in the last hour.
+                Check cloud provider quotas and IAM permissions.
+
+          - alert: ClusterAutoscalerScaleDownBlocked
+            expr: |
+              cluster_autoscaler_scaled_down_nodes_total == 0
+              and cluster_autoscaler_unneeded_nodes_count > 0
+            for: 1h
+            labels:
+              severity: info
+            annotations:
+              summary: "Cluster Autoscaler: scale-down bloklanıb"
+              description: >-
+                Cluster autoscaler has {{ $value }} unneeded nodes
+                but cannot scale down. Check PDBs, local storage, and
+                system pods preventing scale-down.
+
+      # ================================================================
+      #  30. NETWORK I/O & BANDWIDTH
+      # ================================================================
+      - name: network-io
+        rules:
+          - alert: ContainerHighNetworkReceiveBandwidth
+            expr: |
+              (
+                sum by (namespace, pod) (
+                  rate(container_network_receive_bytes_total{interface!="lo"}[5m])
+                ) > 100 * 1024 * 1024
+              )
+              * on(namespace, pod) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 15m
+            labels:
+              severity: info
+            annotations:
+              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} yüksək network receive"
+              description: >-
+                Pod {{ $labels.namespace }}/{{ $labels.pod }}
+                is receiving {{ $value | humanize }}B/s of network traffic.
+
+          - alert: ContainerHighNetworkTransmitBandwidth
+            expr: |
+              (
+                sum by (namespace, pod) (
+                  rate(container_network_transmit_bytes_total{interface!="lo"}[5m])
+                ) > 100 * 1024 * 1024
+              )
+              * on(namespace, pod) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 15m
+            labels:
+              severity: info
+            annotations:
+              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} yüksək network transmit"
+              description: >-
+                Pod {{ $labels.namespace }}/{{ $labels.pod }}
+                is transmitting {{ $value | humanize }}B/s of network traffic.
+
+          - alert: ContainerHighNetworkReceiveErrors
+            expr: |
+              (increase(container_network_receive_errors_total{interface!="lo"}[5m]) > 0)
+              * on(namespace, pod) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} network receive xətaları"
+              description: >-
+                Pod {{ $labels.namespace }}/{{ $labels.pod }}
+                has {{ $value | printf "%.0f" }} network receive errors
+                in the last 5 minutes. Check network configuration.
+
+          - alert: ContainerHighNetworkTransmitErrors
+            expr: |
+              (increase(container_network_transmit_errors_total{interface!="lo"}[5m]) > 0)
+              * on(namespace, pod) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} network transmit xətaları"
+              description: >-
+                Pod {{ $labels.namespace }}/{{ $labels.pod }}
+                has {{ $value | printf "%.0f" }} network transmit errors
+                in the last 5 minutes.
+
+          - alert: ContainerNetworkPacketDrops
+            expr: |
+              (
+                (
+                  increase(container_network_receive_packets_dropped_total{interface!="lo"}[5m])
+                  +
+                  increase(container_network_transmit_packets_dropped_total{interface!="lo"}[5m])
+                ) > 100
+              )
+              * on(namespace, pod) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} packet drop var"
+              description: >-
+                Pod {{ $labels.namespace }}/{{ $labels.pod }}
+                has {{ $value | printf "%.0f" }} dropped packets
+                in the last 5 minutes. Network congestion or misconfiguration.
+
+      # ================================================================
+      #  31. CONTAINER PROCESS & OOM
+      # ================================================================
+      - name: container-process
+        rules:
+          - alert: ContainerHighThreadCount
+            expr: |
+              (container_threads{container!="", image!=""} > 500)
+              * on(namespace, pod) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Container {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} çoxlu thread"
+              description: >-
+                Container {{ $labels.container }} in pod
+                {{ $labels.namespace }}/{{ $labels.pod }}
+                is running {{ $value }} threads. Possible thread leak.
+
+          - alert: ContainerHighOpenFileDescriptors
+            expr: |
+              (container_file_descriptors{container!="", image!=""} > 10000)
+              * on(namespace, pod) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Container {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} çoxlu file descriptor"
+              description: >-
+                Container {{ $labels.container }} in pod
+                {{ $labels.namespace }}/{{ $labels.pod }}
+                has {{ $value }} open file descriptors.
+                Possible connection or file leak.
+
+          - alert: ContainerOOMEventsFrequent
+            expr: |
+              (
+                increase(
+                  kube_pod_container_status_restarts_total[1h]
+                ) > 3
+                and on(namespace, pod, container)
+                kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
+              )
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 0m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Container {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} davamlı OOMKilled"
+              description: >-
+                Container {{ $labels.container }} in pod
+                {{ $labels.namespace }}/{{ $labels.pod }}
+                has been OOMKilled and restarted {{ $value | printf "%.0f" }}
+                times in the last hour. Memory limit is too low.
+
+      # ================================================================
+      #  32. WORKLOAD CHANGE DETECTION
+      # ================================================================
+      - name: workload-changes
+        rules:
+          - alert: DeploymentImageChanged
+            expr: |
+              (changes(kube_deployment_metadata_generation[30m]) > 0)
+              * on(cluster, namespace, deployment)
+              (
+                max by (cluster, namespace, deployment) (
+                  label_replace(
+                    (
+                      namespace_workload_pod:kube_pod_owner:relabel
+                      * on(pod, namespace, cluster)
+                      group_left()
+                      kube_pod_labels{environment="prod", team="Fintech-Sre"}
+                    ),
+                    "deployment", "$1", "workload", "(.*)"
+                  )
+                )
+              )
+            for: 0m
+            labels:
+              severity: info
+            annotations:
+              summary: "Deployment {{ $labels.namespace }}/{{ $labels.deployment }} yenilənib"
+              description: >-
+                Deployment {{ $labels.namespace }}/{{ $labels.deployment }}
+                spec has been updated in the last 30 minutes.
+                A rollout may be in progress.
+
+          - alert: NewNamespaceCreated
+            expr: |
+              (time() - kube_namespace_created < 300)
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 0m
+            labels:
+              severity: info
+            annotations:
+              summary: "Yeni namespace yaradılıb: {{ $labels.namespace }}"
+              description: >-
+                Namespace {{ $labels.namespace }} was created
+                less than 5 minutes ago.
+
+          - alert: PodCountDroppedSudenly
+            expr: |
+              (
+                (
+                  count by (namespace, cluster) (kube_pod_info)
+                  /
+                  count by (namespace, cluster) (kube_pod_info offset 15m)
+                ) < 0.5
+                and count by (namespace, cluster) (kube_pod_info offset 15m) > 3
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Namespace {{ $labels.namespace }}-da pod sayı kəskin azalıb"
+              description: >-
+                Namespace {{ $labels.namespace }} pod count dropped by more than 50%
+                in the last 15 minutes (from previous count > 3).
+                Possible mass deletion or scaling event.
+
+          - alert: PodCountSpiked
+            expr: |
+              (
+                (
+                  count by (namespace, cluster) (kube_pod_info)
+                  /
+                  count by (namespace, cluster) (kube_pod_info offset 15m)
+                ) > 3
+                and count by (namespace, cluster) (kube_pod_info offset 15m) > 1
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: info
+            annotations:
+              summary: "Namespace {{ $labels.namespace }}-da pod sayı kəskin artıb"
+              description: >-
+                Namespace {{ $labels.namespace }} pod count tripled
+                in the last 15 minutes. Possible autoscaling or fork bomb.
