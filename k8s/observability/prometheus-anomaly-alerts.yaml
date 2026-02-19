@@ -232,17 +232,15 @@ data:
                 tərəfdədir (nginx/network deyil). Cluster: {{ $labels.cluster }}.
 
       # ================================================================
-      #  TRAFFIC ANOMALY DETECTION (WEEK-OVER-WEEK)
+      #  TRAFFIC ANOMALY DETECTION (DAY-OVER-DAY)
       #
-      #  Baseline: offset 7d (keçən həftənin eyni günü/saatı ilə müqayisə)
-      #  Reason:   load əsasən 9:00-20:00 iş günlərində olur, bazar günü
-      #            demək olar ki request yoxdur. offset 24h istifadə etsək:
-      #            - bazar ertəsi vs bazar → false spike (0 → normal)
-      #            - bazar vs şənbə → false drop (normal → 0)
-      #            offset 7d həftəlik cycle-ı nəzərə alır:
-      #            - bazar ertəsi vs keçən bazar ertəsi (hər ikisi normal)
-      #            - bazar vs keçən bazar (hər ikisi ~0)
-      #            - cümə vs keçən cümə (eyni pattern)
+      #  Baseline: offset 24h (dünənki eyni saat ilə müqayisə)
+      #  Reason:   load əsasən 9:00-20:00-da olur. 1h baseline gecə/gündüz
+      #            keçidlərində false alert yaradır. offset 24h dünənki eyni
+      #            saatla müqayisə etdiyinə görə daily cycle-ı nəzərə alır:
+      #            - gecə 2:00 indiki vs dünən gecə 2:00 (hər ikisi az)
+      #            - səhər 10:00 indiki vs dünən 10:00 (hər ikisi çox)
+      #            - axşam azalma indiki vs dünən axşam (hər ikisi azalır)
       # ================================================================
       - name: traffic-anomaly
         rules:
@@ -255,13 +253,13 @@ data:
                   )
                   < 0.4 *
                   sum by (namespace, ingress, host, cluster) (
-                    rate(nginx_ingress_controller_requests[15m] offset 7d)
+                    rate(nginx_ingress_controller_requests[15m] offset 24h)
                   )
                 )
                 and
                 (
                   sum by (namespace, ingress, host, cluster) (
-                    rate(nginx_ingress_controller_requests[15m] offset 7d)
+                    rate(nginx_ingress_controller_requests[15m] offset 24h)
                   ) > 1
                 )
               )
@@ -271,12 +269,12 @@ data:
             labels:
               severity: critical
             annotations:
-              summary: "[Anomaly] Ingress {{ $labels.namespace }}/{{ $labels.ingress }} traffic kəskin azalıb (week-over-week)"
+              summary: "[Anomaly] Ingress {{ $labels.namespace }}/{{ $labels.ingress }} traffic kəskin azalıb (day-over-day)"
               description: >-
                 Ingress {{ $labels.host }} ({{ $labels.namespace }}/{{ $labels.ingress }})
-                traffic keçən həftənin eyni gün/saatının {{ $value | humanizePercentage }}-nə
-                düşüb (baseline: keçən həftə > 1 rps). DNS problemi, routing failure,
-                və ya client-side breakage ola bilər. Cluster: {{ $labels.cluster }}.
+                traffic dünənki eyni saatın {{ $value | humanizePercentage }}-nə düşüb
+                (baseline: dünən > 1 rps). DNS problemi, routing failure, və ya
+                client-side breakage ola bilər. Cluster: {{ $labels.cluster }}.
 
           - alert: TrafficSpikeAnomaly
             expr: |
@@ -287,13 +285,13 @@ data:
                   )
                   > 5 *
                   sum by (namespace, ingress, host, cluster) (
-                    rate(nginx_ingress_controller_requests[15m] offset 7d)
+                    rate(nginx_ingress_controller_requests[15m] offset 24h)
                   )
                 )
                 and
                 (
                   sum by (namespace, ingress, host, cluster) (
-                    rate(nginx_ingress_controller_requests[15m] offset 7d)
+                    rate(nginx_ingress_controller_requests[15m] offset 24h)
                   ) > 0.5
                 )
                 and
@@ -309,10 +307,10 @@ data:
             labels:
               severity: warning
             annotations:
-              summary: "[Anomaly] Ingress {{ $labels.namespace }}/{{ $labels.ingress }} traffic 5x artıb (week-over-week)"
+              summary: "[Anomaly] Ingress {{ $labels.namespace }}/{{ $labels.ingress }} traffic 5x artıb (day-over-day)"
               description: >-
                 Ingress {{ $labels.host }} ({{ $labels.namespace }}/{{ $labels.ingress }})
-                keçən həftənin eyni gün/saatından 5x çox traffic alır (hazırda > 5 rps).
+                dünənki eyni saatdan 5x çox traffic alır (hazırda > 5 rps).
                 DDoS, bot surge, və ya gözlənilməz yük ola bilər.
                 Cluster: {{ $labels.cluster }}.
 
@@ -327,7 +325,7 @@ data:
                 and
                 (
                   sum by (namespace, ingress, host, cluster) (
-                    rate(nginx_ingress_controller_requests[15m] offset 7d)
+                    rate(nginx_ingress_controller_requests[15m] offset 24h)
                   ) > 1
                 )
               )
@@ -340,9 +338,8 @@ data:
               summary: "[Anomaly] Ingress {{ $labels.namespace }}/{{ $labels.ingress }} sıfır traffic alır"
               description: >-
                 Ingress {{ $labels.host }} ({{ $labels.namespace }}/{{ $labels.ingress }})
-                son 15 dəqiqədə heç bir request almayıb, amma keçən həftə eyni
-                gün/saatda > 1 rps traffic var idi. Service tamamilə unreachable
-                ola bilər.
+                son 15 dəqiqədə heç bir request almayıb, amma dünən eyni saatda
+                > 1 rps traffic var idi. Service tamamilə unreachable ola bilər.
                 Cluster: {{ $labels.cluster }}.
 
       # ================================================================
@@ -561,7 +558,7 @@ data:
                   )
                   > 5 *
                   sum by (namespace, pod, cluster) (
-                    rate(container_network_receive_bytes_total[10m] offset 7d)
+                    rate(container_network_receive_bytes_total[10m] offset 24h)
                   )
                 )
                 and
@@ -573,7 +570,7 @@ data:
                 and
                 (
                   sum by (namespace, pod, cluster) (
-                    rate(container_network_receive_bytes_total[10m] offset 7d)
+                    rate(container_network_receive_bytes_total[10m] offset 24h)
                   ) > 100 * 1024
                 )
               )
@@ -585,8 +582,8 @@ data:
             annotations:
               summary: "[Anomaly] {{ $labels.namespace }}/{{ $labels.pod }} network receive traffic anomal artıb"
               description: >-
-                Pod {{ $labels.namespace }}/{{ $labels.pod }} keçən həftənin eyni
-                gün/saatından 5x çox network traffic alır (hazırda > 1MB/s).
+                Pod {{ $labels.namespace }}/{{ $labels.pod }} dünənki eyni saatdan
+                5x çox network traffic alır (hazırda > 1MB/s).
                 DDoS, data dump, və ya misconfigured client ola bilər.
                 Cluster: {{ $labels.cluster }}.
 
@@ -599,7 +596,7 @@ data:
                   )
                   > 5 *
                   sum by (namespace, pod, cluster) (
-                    rate(container_network_transmit_bytes_total[10m] offset 7d)
+                    rate(container_network_transmit_bytes_total[10m] offset 24h)
                   )
                 )
                 and
@@ -611,7 +608,7 @@ data:
                 and
                 (
                   sum by (namespace, pod, cluster) (
-                    rate(container_network_transmit_bytes_total[10m] offset 7d)
+                    rate(container_network_transmit_bytes_total[10m] offset 24h)
                   ) > 100 * 1024
                 )
               )
@@ -623,10 +620,10 @@ data:
             annotations:
               summary: "[Anomaly] {{ $labels.namespace }}/{{ $labels.pod }} network transmit traffic anomal artıb"
               description: >-
-                Pod {{ $labels.namespace }}/{{ $labels.pod }} keçən həftənin eyni
-                gün/saatından 5x çox network traffic göndərir (hazırda > 1MB/s).
-                Data exfiltration, log flood, və ya anormal response size ola
-                bilər. Cluster: {{ $labels.cluster }}.
+                Pod {{ $labels.namespace }}/{{ $labels.pod }} dünənki eyni saatdan
+                5x çox network traffic göndərir (hazırda > 1MB/s).
+                Data exfiltration, log flood, və ya anormal response size
+                ola bilər. Cluster: {{ $labels.cluster }}.
 
       # ================================================================
       #  SATURATION & THROUGHPUT ANOMALY DETECTION

@@ -85,8 +85,14 @@ spec:
           configMap:
             name: prometheus-config
         - name: alert-rules
-          configMap:
-            name: prometheus-alerts
+          projected:
+            sources:
+              - configMap:
+                  name: prometheus-alerts
+              - configMap:
+                  name: prometheus-alerts-pod-extra
+              - configMap:
+                  name: prometheus-alerts-anomaly
         - name: data
           emptyDir: {}
 ---
