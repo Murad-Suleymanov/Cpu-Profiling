@@ -1,0 +1,780 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-alerts-anomaly
+  namespace: observability
+data:
+  anomaly-alerts.yml: |
+    groups:
+      # ================================================================
+      #  LATENCY ANOMALY DETECTION
+      # ================================================================
+      - name: latency-anomaly
+        rules:
+          - alert: LatencyP99SpikeVsBaseline
+            expr: |
+              (
+                histogram_quantile(0.99,
+                  sum by (le, namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_request_duration_seconds_bucket[5m])
+                  )
+                )
+                >
+                3 * histogram_quantile(0.99,
+                  sum by (le, namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_request_duration_seconds_bucket[1h])
+                  )
+                )
+                and histogram_quantile(0.99,
+                  sum by (le, namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_request_duration_seconds_bucket[1h])
+                  )
+                ) > 0.01
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[Anomaly] Ingress {{ $labels.namespace }}/{{ $labels.ingress }} P99 latency kəskin artıb"
+              description: >-
+                Ingress {{ $labels.host }} ({{ $labels.namespace }}/{{ $labels.ingress }})
+                P99 latency is {{ $value | printf "%.2f" }}s — more than 3x its 1-hour
+                baseline. This is an anomalous spike that may indicate backend
+                degradation or upstream dependency issues.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: LatencyP50SuddenIncrease
+            expr: |
+              (
+                histogram_quantile(0.50,
+                  sum by (le, namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_request_duration_seconds_bucket[5m])
+                  )
+                )
+                >
+                2 * histogram_quantile(0.50,
+                  sum by (le, namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_request_duration_seconds_bucket[1h])
+                  )
+                )
+                and histogram_quantile(0.50,
+                  sum by (le, namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_request_duration_seconds_bucket[1h])
+                  )
+                ) > 0.005
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[Anomaly] Ingress {{ $labels.namespace }}/{{ $labels.ingress }} median latency 2x artıb"
+              description: >-
+                Ingress {{ $labels.host }} ({{ $labels.namespace }}/{{ $labels.ingress }})
+                median (P50) latency is {{ $value | printf "%.3f" }}s — more than
+                2x its 1-hour baseline. This affects the majority of requests
+                and indicates a widespread slowdown.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: LatencyP99AbsoluteThresholdBreached
+            expr: |
+              (
+                histogram_quantile(0.99,
+                  sum by (le, namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_request_duration_seconds_bucket[5m])
+                  )
+                ) > 10
+                and
+                histogram_quantile(0.99,
+                  sum by (le, namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_request_duration_seconds_bucket[1h])
+                  )
+                ) < 5
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "[Anomaly] Ingress {{ $labels.namespace }}/{{ $labels.ingress }} P99 latency 10s-i keçib"
+              description: >-
+                Ingress {{ $labels.host }} ({{ $labels.namespace }}/{{ $labels.ingress }})
+                P99 latency jumped to {{ $value | printf "%.1f" }}s (threshold: 10s)
+                while the 1-hour baseline was under 5s. This is a severe anomaly
+                likely caused by backend failure, resource exhaustion, or external
+                dependency timeout.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: LatencyGradualDegradation
+            expr: |
+              (
+                histogram_quantile(0.95,
+                  sum by (le, namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_request_duration_seconds_bucket[30m])
+                  )
+                )
+                >
+                1.5 * histogram_quantile(0.95,
+                  sum by (le, namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_request_duration_seconds_bucket[6h])
+                  )
+                )
+                and histogram_quantile(0.95,
+                  sum by (le, namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_request_duration_seconds_bucket[6h])
+                  )
+                ) > 0.01
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 30m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[Anomaly] Ingress {{ $labels.namespace }}/{{ $labels.ingress }} latency tədricən artır"
+              description: >-
+                Ingress {{ $labels.host }} ({{ $labels.namespace }}/{{ $labels.ingress }})
+                P95 latency over the last 30 minutes is {{ $value | printf "%.2f" }}s —
+                1.5x above the 6-hour baseline. This gradual degradation may
+                indicate a memory leak, connection pool exhaustion, or growing
+                queue depth in the backend.
+                Cluster: {{ $labels.cluster }}.
+
+      # ================================================================
+      #  TRAFFIC ANOMALY DETECTION
+      # ================================================================
+      - name: traffic-anomaly
+        rules:
+          - alert: TrafficRateSuddenDrop
+            expr: |
+              (
+                (
+                  sum by (namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_requests[5m])
+                  )
+                  /
+                  sum by (namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_requests[1h])
+                  )
+                ) < 0.3
+                and sum by (namespace, ingress, host, cluster) (
+                  rate(nginx_ingress_controller_requests[1h])
+                ) > 0.1
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "[Anomaly] Ingress {{ $labels.namespace }}/{{ $labels.ingress }} traffic kəskin azalıb"
+              description: >-
+                Ingress {{ $labels.host }} ({{ $labels.namespace }}/{{ $labels.ingress }})
+                traffic dropped to {{ $value | humanizePercentage }} of its 1-hour
+                baseline. This sudden drop may indicate DNS issues, upstream
+                routing failure, or client-side breakage.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: TrafficRateSuddenSpike
+            expr: |
+              (
+                (
+                  sum by (namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_requests[5m])
+                  )
+                  /
+                  sum by (namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_requests[1h])
+                  )
+                ) > 5
+                and sum by (namespace, ingress, host, cluster) (
+                  rate(nginx_ingress_controller_requests[1h])
+                ) > 0.1
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 3m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[Anomaly] Ingress {{ $labels.namespace }}/{{ $labels.ingress }} traffic kəskin artıb (5x)"
+              description: >-
+                Ingress {{ $labels.host }} ({{ $labels.namespace }}/{{ $labels.ingress }})
+                is receiving 5x more traffic than its 1-hour average.
+                This could be a DDoS attack, bot surge, or unexpected viral load.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: ZeroTrafficAnomaly
+            expr: |
+              (
+                sum by (namespace, ingress, host, cluster) (
+                  rate(nginx_ingress_controller_requests[10m])
+                ) == 0
+                and sum by (namespace, ingress, host, cluster) (
+                  rate(nginx_ingress_controller_requests[1h])
+                ) > 0.1
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "[Anomaly] Ingress {{ $labels.namespace }}/{{ $labels.ingress }} sıfır traffic alır"
+              description: >-
+                Ingress {{ $labels.host }} ({{ $labels.namespace }}/{{ $labels.ingress }})
+                received zero requests in the last 10 minutes despite having
+                active traffic in the previous hour. Service may be completely
+                unreachable.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: TrafficPatternShift
+            expr: |
+              (
+                abs(
+                  sum by (namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_requests[15m])
+                  )
+                  -
+                  sum by (namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_requests[15m] offset 1h)
+                  )
+                )
+                /
+                sum by (namespace, ingress, host, cluster) (
+                  rate(nginx_ingress_controller_requests[15m] offset 1h)
+                )
+                > 3
+                and sum by (namespace, ingress, host, cluster) (
+                  rate(nginx_ingress_controller_requests[15m] offset 1h)
+                ) > 0.1
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: info
+            annotations:
+              summary: "[Anomaly] Ingress {{ $labels.namespace }}/{{ $labels.ingress }} traffic pattern dəyişib"
+              description: >-
+                Ingress {{ $labels.host }} ({{ $labels.namespace }}/{{ $labels.ingress }})
+                traffic pattern shifted by more than 3x compared to the same
+                window 1 hour ago. Investigate if this is expected (deploy,
+                campaign) or anomalous.
+                Cluster: {{ $labels.cluster }}.
+
+      # ================================================================
+      #  ERROR RATE ANOMALY DETECTION
+      # ================================================================
+      - name: error-rate-anomaly
+        rules:
+          - alert: ErrorRateAnomaly5xx
+            expr: |
+              (
+                (
+                  sum by (namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_requests{status=~"5.."}[5m])
+                  )
+                  /
+                  sum by (namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_requests[5m])
+                  )
+                )
+                >
+                3 * (
+                  sum by (namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_requests{status=~"5.."}[1h])
+                  )
+                  /
+                  sum by (namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_requests[1h])
+                  )
+                )
+                and (
+                  sum by (namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_requests{status=~"5.."}[5m])
+                  )
+                  /
+                  sum by (namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_requests[5m])
+                  )
+                ) > 0.01
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 3m
+            labels:
+              severity: critical
+            annotations:
+              summary: "[Anomaly] Ingress {{ $labels.namespace }}/{{ $labels.ingress }} 5xx rate kəskin artıb"
+              description: >-
+                Ingress {{ $labels.host }} ({{ $labels.namespace }}/{{ $labels.ingress }})
+                5xx error rate is {{ $value | humanizePercentage }} — more than 3x
+                the 1-hour baseline. This anomalous error spike may indicate
+                backend crashes, deployment issues, or dependency failures.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: ErrorBurstDetected
+            expr: |
+              (
+                sum by (namespace, ingress, host, cluster) (
+                  increase(nginx_ingress_controller_requests{status=~"5.."}[2m])
+                ) > 50
+                and (
+                  sum by (namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_requests{status=~"5.."}[2m])
+                  )
+                  /
+                  sum by (namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_requests[2m])
+                  )
+                ) > 0.3
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 0m
+            labels:
+              severity: critical
+            annotations:
+              summary: "[Anomaly] Ingress {{ $labels.namespace }}/{{ $labels.ingress }} error burst aşkarlanıb"
+              description: >-
+                Ingress {{ $labels.host }} ({{ $labels.namespace }}/{{ $labels.ingress }})
+                had {{ $value | printf "%.0f" }} 5xx errors in 2 minutes with
+                >30% error ratio. This is an acute error burst — likely a deploy
+                gone wrong or sudden backend failure.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: ClientErrorRateAnomaly4xx
+            expr: |
+              (
+                (
+                  sum by (namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_requests{status=~"4.."}[5m])
+                  )
+                  /
+                  sum by (namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_requests[5m])
+                  )
+                )
+                >
+                3 * (
+                  sum by (namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_requests{status=~"4.."}[1h])
+                  )
+                  /
+                  sum by (namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_requests[1h])
+                  )
+                )
+                and (
+                  sum by (namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_requests{status=~"4.."}[5m])
+                  )
+                  /
+                  sum by (namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_requests[5m])
+                  )
+                ) > 0.1
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[Anomaly] Ingress {{ $labels.namespace }}/{{ $labels.ingress }} 4xx rate anomal artıb"
+              description: >-
+                Ingress {{ $labels.host }} ({{ $labels.namespace }}/{{ $labels.ingress }})
+                4xx error rate is {{ $value | humanizePercentage }} — more than 3x
+                the 1-hour baseline. Sudden 4xx spike may indicate broken clients
+                after an API change, auth issues, or route misconfiguration.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: UpstreamResponseTimeAnomaly
+            expr: |
+              (
+                histogram_quantile(0.99,
+                  sum by (le, namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_response_duration_seconds_bucket[5m])
+                  )
+                )
+                >
+                3 * histogram_quantile(0.99,
+                  sum by (le, namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_response_duration_seconds_bucket[1h])
+                  )
+                )
+                and histogram_quantile(0.99,
+                  sum by (le, namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_response_duration_seconds_bucket[1h])
+                  )
+                ) > 0.01
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[Anomaly] Ingress {{ $labels.namespace }}/{{ $labels.ingress }} upstream response time anomal"
+              description: >-
+                Ingress {{ $labels.host }} ({{ $labels.namespace }}/{{ $labels.ingress }})
+                upstream (backend) P99 response time is {{ $value | printf "%.2f" }}s —
+                more than 3x the 1-hour baseline. The backend service itself is
+                responding slowly, not just the overall request path.
+                Cluster: {{ $labels.cluster }}.
+
+      # ================================================================
+      #  RESOURCE USAGE ANOMALY DETECTION
+      # ================================================================
+      - name: resource-usage-anomaly
+        rules:
+          - alert: CPUUsageSpikeAnomaly
+            expr: |
+              (
+                (
+                  rate(container_cpu_usage_seconds_total{container!="", image!=""}[5m])
+                  /
+                  avg_over_time(
+                    rate(container_cpu_usage_seconds_total{container!="", image!=""}[5m])[1h:5m]
+                  )
+                ) > 3
+                and rate(container_cpu_usage_seconds_total{container!="", image!=""}[5m]) > 0.1
+              )
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[Anomaly] {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} CPU istifadəsi anomal artıb"
+              description: >-
+                Container {{ $labels.container }} in pod {{ $labels.namespace }}/{{ $labels.pod }}
+                CPU usage is {{ $value | printf "%.1f" }}x its 1-hour average.
+                This anomalous spike may indicate a runaway process, infinite loop,
+                or sudden load increase.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: MemoryGrowthAnomaly
+            expr: |
+              (
+                deriv(container_memory_working_set_bytes{container!="", image!=""}[1h]) > 0
+                and (
+                  predict_linear(container_memory_working_set_bytes{container!="", image!=""}[1h], 3600)
+                  >
+                  on(namespace, pod, container)
+                  kube_pod_container_resource_limits{resource="memory"}
+                )
+                and kube_pod_container_resource_limits{resource="memory"} > 0
+              )
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 30m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[Anomaly] {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} memory artımı anomal — 1 saata limit keçəcək"
+              description: >-
+                Container {{ $labels.container }} in pod {{ $labels.namespace }}/{{ $labels.pod }}
+                memory is growing steadily. At the current rate, it will exceed
+                its memory limit within 1 hour. This pattern strongly suggests
+                a memory leak.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: MemoryUsageSpikeAnomaly
+            expr: |
+              (
+                (
+                  container_memory_working_set_bytes{container!="", image!=""}
+                  /
+                  avg_over_time(container_memory_working_set_bytes{container!="", image!=""}[6h])
+                ) > 2
+                and container_memory_working_set_bytes{container!="", image!=""} > 100 * 1024 * 1024
+              )
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[Anomaly] {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} memory istifadəsi anomal artıb"
+              description: >-
+                Container {{ $labels.container }} in pod {{ $labels.namespace }}/{{ $labels.pod }}
+                memory usage is {{ $value | printf "%.1f" }}x its 6-hour average
+                (currently above 100Mi). Possible causes: cache buildup, leak,
+                or abnormal request pattern.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: NetworkReceiveBytesAnomaly
+            expr: |
+              (
+                (
+                  sum by (namespace, pod, cluster) (
+                    rate(container_network_receive_bytes_total[5m])
+                  )
+                  /
+                  sum by (namespace, pod, cluster) (
+                    avg_over_time(rate(container_network_receive_bytes_total[5m])[1h:5m])
+                  )
+                ) > 5
+                and sum by (namespace, pod, cluster) (
+                  rate(container_network_receive_bytes_total[5m])
+                ) > 1024 * 1024
+              )
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[Anomaly] {{ $labels.namespace }}/{{ $labels.pod }} network receive traffic anomal artıb"
+              description: >-
+                Pod {{ $labels.namespace }}/{{ $labels.pod }} is receiving 5x more
+                network traffic than its 1-hour average (currently > 1MB/s).
+                Possible causes: DDoS, data dump, or misconfigured client.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: NetworkTransmitBytesAnomaly
+            expr: |
+              (
+                (
+                  sum by (namespace, pod, cluster) (
+                    rate(container_network_transmit_bytes_total[5m])
+                  )
+                  /
+                  sum by (namespace, pod, cluster) (
+                    avg_over_time(rate(container_network_transmit_bytes_total[5m])[1h:5m])
+                  )
+                ) > 5
+                and sum by (namespace, pod, cluster) (
+                  rate(container_network_transmit_bytes_total[5m])
+                ) > 1024 * 1024
+              )
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[Anomaly] {{ $labels.namespace }}/{{ $labels.pod }} network transmit traffic anomal artıb"
+              description: >-
+                Pod {{ $labels.namespace }}/{{ $labels.pod }} is transmitting 5x more
+                network traffic than its 1-hour average (currently > 1MB/s).
+                Possible data exfiltration, log flood, or abnormal response sizes.
+                Cluster: {{ $labels.cluster }}.
+
+      # ================================================================
+      #  SATURATION & THROUGHPUT ANOMALY DETECTION
+      # ================================================================
+      - name: saturation-anomaly
+        rules:
+          - alert: IngressConnectionSaturation
+            expr: |
+              (
+                sum by (namespace, ingress, host, cluster) (
+                  nginx_ingress_controller_nginx_process_connections
+                )
+                >
+                3 * avg_over_time(
+                  sum by (namespace, ingress, host, cluster) (
+                    nginx_ingress_controller_nginx_process_connections
+                  )[1h:5m]
+                )
+                and sum by (namespace, ingress, host, cluster) (
+                  nginx_ingress_controller_nginx_process_connections
+                ) > 100
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[Anomaly] Ingress {{ $labels.namespace }}/{{ $labels.ingress }} connection sayı anomal artıb"
+              description: >-
+                Ingress {{ $labels.host }} ({{ $labels.namespace }}/{{ $labels.ingress }})
+                active connections are 3x above the 1-hour average. This
+                saturation may lead to request queuing and increased latency.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: RequestThroughputDropAnomaly
+            expr: |
+              (
+                (
+                  sum by (namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_requests[5m])
+                  )
+                )
+                < 0.5 * (
+                  sum by (namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_requests[5m] offset 24h)
+                  )
+                )
+                and sum by (namespace, ingress, host, cluster) (
+                  rate(nginx_ingress_controller_requests[5m] offset 24h)
+                ) > 1
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[Anomaly] Ingress {{ $labels.namespace }}/{{ $labels.ingress }} throughput dünənə nisbətən 50%+ aşağı"
+              description: >-
+                Ingress {{ $labels.host }} ({{ $labels.namespace }}/{{ $labels.ingress }})
+                current throughput is less than half of the same time window
+                24 hours ago. This day-over-day anomaly may indicate a service
+                issue invisible to other alerts.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: HighLatencyWithLowErrorRate
+            expr: |
+              (
+                histogram_quantile(0.95,
+                  sum by (le, namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_request_duration_seconds_bucket[5m])
+                  )
+                ) > 5
+                and (
+                  sum by (namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_requests{status=~"5.."}[5m])
+                  )
+                  /
+                  sum by (namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_requests[5m])
+                  )
+                ) < 0.01
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[Anomaly] Ingress {{ $labels.namespace }}/{{ $labels.ingress }} yüksək latency amma error yoxdur"
+              description: >-
+                Ingress {{ $labels.host }} ({{ $labels.namespace }}/{{ $labels.ingress }})
+                P95 latency is {{ $value | printf "%.1f" }}s but the 5xx error rate
+                is below 1%. Requests are succeeding but very slowly — typical of
+                database lock contention, external API slowness, or thread pool
+                exhaustion. These "silent" performance issues are often missed
+                by error-rate-only monitoring.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: ContainerThrottlingAnomaly
+            expr: |
+              (
+                (
+                  rate(container_cpu_cfs_throttled_seconds_total{container!="", image!=""}[5m])
+                  /
+                  rate(container_cpu_usage_seconds_total{container!="", image!=""}[5m])
+                ) > 0.5
+                and (
+                  rate(container_cpu_cfs_throttled_seconds_total{container!="", image!=""}[5m])
+                  /
+                  avg_over_time(
+                    rate(container_cpu_cfs_throttled_seconds_total{container!="", image!=""}[5m])[1h:5m]
+                  )
+                ) > 3
+              )
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[Anomaly] {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} CPU throttling anomal artıb"
+              description: >-
+                Container {{ $labels.container }} in pod {{ $labels.namespace }}/{{ $labels.pod }}
+                CPU throttling jumped to 3x its 1-hour average and is throttled
+                >50% of the time. This directly degrades request latency and
+                throughput. Consider increasing CPU limits.
+                Cluster: {{ $labels.cluster }}.
+
+      # ================================================================
+      #  DNS & NETWORK LATENCY ANOMALY DETECTION
+      # ================================================================
+      - name: dns-network-anomaly
+        rules:
+          - alert: CoreDNSLatencyAnomaly
+            expr: |
+              (
+                histogram_quantile(0.99,
+                  sum by (le, cluster) (
+                    rate(coredns_dns_request_duration_seconds_bucket[5m])
+                  )
+                )
+                >
+                3 * histogram_quantile(0.99,
+                  sum by (le, cluster) (
+                    rate(coredns_dns_request_duration_seconds_bucket[1h])
+                  )
+                )
+                and histogram_quantile(0.99,
+                  sum by (le, cluster) (
+                    rate(coredns_dns_request_duration_seconds_bucket[1h])
+                  )
+                ) > 0.001
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[Anomaly] CoreDNS P99 latency anomal artıb"
+              description: >-
+                CoreDNS P99 latency is {{ $value | printf "%.3f" }}s — more than
+                3x the 1-hour baseline. DNS resolution slowness will cascade
+                to all services making outbound connections.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: CoreDNSErrorRateAnomaly
+            expr: |
+              (
+                (
+                  sum by (cluster) (
+                    rate(coredns_dns_responses_total{rcode=~"SERVFAIL|REFUSED"}[5m])
+                  )
+                  /
+                  sum by (cluster) (
+                    rate(coredns_dns_responses_total[5m])
+                  )
+                )
+                >
+                3 * (
+                  sum by (cluster) (
+                    rate(coredns_dns_responses_total{rcode=~"SERVFAIL|REFUSED"}[1h])
+                  )
+                  /
+                  sum by (cluster) (
+                    rate(coredns_dns_responses_total[1h])
+                  )
+                )
+                and (
+                  sum by (cluster) (
+                    rate(coredns_dns_responses_total{rcode=~"SERVFAIL|REFUSED"}[5m])
+                  )
+                  /
+                  sum by (cluster) (
+                    rate(coredns_dns_responses_total[5m])
+                  )
+                ) > 0.01
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[Anomaly] CoreDNS error rate anomal artıb"
+              description: >-
+                CoreDNS SERVFAIL/REFUSED error rate is {{ $value | humanizePercentage }} —
+                more than 3x the 1-hour baseline. DNS failures will cause
+                connection timeouts and service discovery issues cluster-wide.
+                Cluster: {{ $labels.cluster }}.

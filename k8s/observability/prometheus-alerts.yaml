@@ -243,24 +243,6 @@ data:
                 cannot be created. Check pod events for details.
                 Team: {{ $labels.team }}, Env: {{ $labels.environment }}.
 
-          - alert: InitContainerFailed
-            expr: |
-              (
-                kube_pod_init_container_status_last_terminated_reason{reason!="Completed"} == 1
-              )
-              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
-              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
-            for: 5m
-            labels:
-              severity: warning
-            annotations:
-              summary: "[{{ $labels.team }}/{{ $labels.squad }}] Pod {{ $labels.namespace }}/{{ $labels.pod }} init container fail olub"
-              description: >-
-                Init container {{ $labels.container }} in pod
-                {{ $labels.namespace }}/{{ $labels.pod }}
-                terminated with reason: {{ $labels.reason }}.
-                Team: {{ $labels.team }}, Env: {{ $labels.environment }}.
-
           - alert: PodContainerNotRunning
             expr: |
               (
@@ -866,7 +848,7 @@ data:
               (
                 count by (node, cluster) (kube_pod_info)
                 /
-                kube_node_status_allocatable{resource="pods"}
+                max by (node, cluster) (kube_node_status_allocatable{resource="pods"})
                 > 0.9
               )
               * on(cluster) group_left()
@@ -1009,7 +991,7 @@ data:
                 /
                 sum by (node, cluster) (
                   kube_node_status_allocatable{resource="cpu"}
-                ) > 1
+                ) > 0.99
               )
               * on(cluster) group_left()
               max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
@@ -2711,7 +2693,7 @@ data:
                   sum by (instance, le, cluster) (
                     rate(kubelet_pleg_relist_duration_seconds_bucket[5m])
                   )
-                ) > 10
+                ) > 1
               )
               * on(cluster) group_left()
               max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
@@ -2732,7 +2714,7 @@ data:
                   sum by (instance, le, cluster) (
                     rate(kubelet_pod_worker_duration_seconds_bucket{operation_type="sync"}[5m])
                   )
-                ) > 60
+                ) > 9
               )
               * on(cluster) group_left()
               max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
