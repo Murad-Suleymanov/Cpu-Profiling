@@ -838,3 +838,633 @@ data:
                 2 saatlıq baseline-dan 3x artıq. DNS failure-lar connection
                 timeout-lara və service discovery problemlərinə səbəb olacaq.
                 Cluster: {{ $labels.cluster }}.
+
+      # ================================================================
+      #  DEPLOYMENT ANOMALY DETECTION
+      #
+      #  Deployment səviyyəli anomaliyalar: replica availability,
+      #  rollout progress, scaling pattern, pod churn.
+      #  kube-state-metrics əsasında işləyir.
+      # ================================================================
+      - name: deployment-anomaly
+        rules:
+          - alert: DeploymentReplicaAvailabilityDrop
+            expr: |
+              (
+                (
+                  kube_deployment_status_replicas_available
+                  /
+                  kube_deployment_spec_replicas
+                ) < 0.7
+                and
+                kube_deployment_spec_replicas > 0
+                and
+                (
+                  avg_over_time(
+                    (
+                      kube_deployment_status_replicas_available
+                      /
+                      kube_deployment_spec_replicas
+                    )[6h:5m]
+                  ) > 0.95
+                )
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: critical
+            annotations:
+              summary: "[Anomaly] Deployment {{ $labels.namespace }}/{{ $labels.deployment }} replica availability kəskin düşüb"
+              description: >-
+                Deployment {{ $labels.namespace }}/{{ $labels.deployment }}
+                available/desired nisbəti {{ $value | humanizePercentage }}-ə düşüb
+                (6 saatlıq ortalama > 95% idi). Sudden pod failure, node problemi,
+                və ya resource exhaustion ola bilər.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: DeploymentRolloutStalled
+            expr: |
+              (
+                kube_deployment_status_condition{condition="Progressing", status="false"} == 1
+                and
+                kube_deployment_spec_replicas > 0
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 15m
+            labels:
+              severity: critical
+            annotations:
+              summary: "[Anomaly] Deployment {{ $labels.namespace }}/{{ $labels.deployment }} rollout ilişib"
+              description: >-
+                Deployment {{ $labels.namespace }}/{{ $labels.deployment }}
+                rollout 15+ dəqiqədir progress etmir. Image pull failure,
+                readiness probe uğursuzluğu, resource quota çatışmazlığı,
+                və ya PDB constraint ola bilər.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: DeploymentScaleDownAnomaly
+            expr: |
+              (
+                (
+                  kube_deployment_spec_replicas
+                  < 0.5 *
+                  avg_over_time(kube_deployment_spec_replicas[1h] offset 7d)
+                )
+                and
+                avg_over_time(kube_deployment_spec_replicas[1h] offset 7d) > 1
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[Anomaly] Deployment {{ $labels.namespace }}/{{ $labels.deployment }} replica sayı anomal azalıb"
+              description: >-
+                Deployment {{ $labels.namespace }}/{{ $labels.deployment }}
+                hazırkı replica sayı keçən həftənin eyni vaxtının yarısından
+                azdır. Gözlənilməz manual scale-down, HPA misconfiguration,
+                və ya accidental edit ola bilər.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: DeploymentScaleUpAnomaly
+            expr: |
+              (
+                (
+                  kube_deployment_spec_replicas
+                  > 3 *
+                  avg_over_time(kube_deployment_spec_replicas[1h] offset 7d)
+                )
+                and
+                kube_deployment_spec_replicas > 3
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[Anomaly] Deployment {{ $labels.namespace }}/{{ $labels.deployment }} replica sayı anomal artıb"
+              description: >-
+                Deployment {{ $labels.namespace }}/{{ $labels.deployment }}
+                replica sayı keçən həftənin eyni vaxtından 3x artıqdır
+                (hazırda > 3). HPA oscillation, traffic anomaliyası,
+                və ya misconfiguration ola bilər.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: DeploymentUnavailableReplicaSpike
+            expr: |
+              (
+                (
+                  kube_deployment_status_replicas_unavailable > 0
+                )
+                and
+                (
+                  avg_over_time(kube_deployment_status_replicas_unavailable[6h:5m]) == 0
+                )
+                and
+                kube_deployment_spec_replicas > 0
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[Anomaly] Deployment {{ $labels.namespace }}/{{ $labels.deployment }} unavailable replica yaranıb"
+              description: >-
+                Deployment {{ $labels.namespace }}/{{ $labels.deployment }}
+                son 6 saatda bütün replica-lar available idi, amma indi
+                unavailable replica var. Node failure, resource pressure,
+                və ya image problemi ola bilər.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: DeploymentReplicaFlapping
+            expr: |
+              (
+                changes(kube_deployment_status_replicas[30m]) > 10
+                and
+                kube_deployment_spec_replicas > 0
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[Anomaly] Deployment {{ $labels.namespace }}/{{ $labels.deployment }} replica-lar flapping edir"
+              description: >-
+                Deployment {{ $labels.namespace }}/{{ $labels.deployment }}
+                son 30 dəqiqədə replica count 10+ dəfə dəyişib. Bu yüksək
+                pod churn CrashLoop, OOMKill, HPA oscillation, və ya node
+                instability-dən yarana bilər.
+                Cluster: {{ $labels.cluster }}.
+
+      # ================================================================
+      #  POD/CONTAINER LEVEL LATENCY & ERROR RATE ANOMALY
+      #
+      #  Mənbə: OpenTelemetry Java auto-instrumentation
+      #  Metrik: http_server_request_duration (histogram)
+      #  Labels: service_namespace, k8s_pod_name, service_name,
+      #          http_request_method, http_response_status_code, http_route
+      #
+      #  Qeyd: Alloy config-da add_metric_suffixes=false olduğu üçün
+      #  metrik adı http_server_request_duration-dır (_seconds yoxdur).
+      #  Bu metrik Kubernetes-dən deyil, OTel auto-instrumentation-dan
+      #  gəlir. Namespace filter üçün kube_pod_labels ilə label_replace
+      #  vasitəsilə join edilir (service_namespace ↔ namespace).
+      #  Team filter yoxdur — namespace-lər arası team fərqli ola bilər.
+      # ================================================================
+      - name: pod-latency-anomaly
+        rules:
+          - alert: PodLatencyP99SpikeAnomaly
+            expr: |
+              (
+                (
+                  histogram_quantile(0.99,
+                    sum by (le, service_namespace, k8s_pod_name, service_name) (
+                      rate(http_server_request_duration_bucket[10m])
+                    )
+                  )
+                  > 3 *
+                  histogram_quantile(0.99,
+                    sum by (le, service_namespace, k8s_pod_name, service_name) (
+                      rate(http_server_request_duration_bucket[2h])
+                    )
+                  )
+                )
+                and
+                (
+                  histogram_quantile(0.99,
+                    sum by (le, service_namespace, k8s_pod_name, service_name) (
+                      rate(http_server_request_duration_bucket[2h])
+                    )
+                  ) > 0.01
+                )
+                and
+                (
+                  sum by (service_namespace, k8s_pod_name, service_name) (
+                    rate(http_server_request_duration_count[10m])
+                  ) > 1
+                )
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[Anomaly] Pod {{ $labels.service_namespace }}/{{ $labels.k8s_pod_name }} P99 latency kəskin artıb"
+              description: >-
+                Pod {{ $labels.k8s_pod_name }} ({{ $labels.service_name }})
+                P99 latency {{ $value | printf "%.2f" }}s — 2 saatlıq baseline-dan
+                3x artıq. Bu spesifik pod-da backend degradation ola bilər.
+                Ingress-level alert-dən fərqli olaraq hansı pod-un yavaşladığını
+                dəqiq göstərir.
+
+          - alert: PodLatencyP50SpikeAnomaly
+            expr: |
+              (
+                (
+                  histogram_quantile(0.50,
+                    sum by (le, service_namespace, k8s_pod_name, service_name) (
+                      rate(http_server_request_duration_bucket[10m])
+                    )
+                  )
+                  > 2.5 *
+                  histogram_quantile(0.50,
+                    sum by (le, service_namespace, k8s_pod_name, service_name) (
+                      rate(http_server_request_duration_bucket[2h])
+                    )
+                  )
+                )
+                and
+                (
+                  histogram_quantile(0.50,
+                    sum by (le, service_namespace, k8s_pod_name, service_name) (
+                      rate(http_server_request_duration_bucket[2h])
+                    )
+                  ) > 0.005
+                )
+                and
+                (
+                  sum by (service_namespace, k8s_pod_name, service_name) (
+                    rate(http_server_request_duration_count[10m])
+                  ) > 1
+                )
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[Anomaly] Pod {{ $labels.service_namespace }}/{{ $labels.k8s_pod_name }} median latency 2.5x artıb"
+              description: >-
+                Pod {{ $labels.k8s_pod_name }} ({{ $labels.service_name }})
+                median (P50) latency {{ $value | printf "%.3f" }}s — 2 saatlıq
+                baseline-dan 2.5x artıq. Bu pod-a gedən requestlərin əksəriyyəti
+                təsirlənir.
+
+      - name: pod-error-rate-anomaly
+        rules:
+          - alert: PodErrorRate5xxAnomaly
+            expr: |
+              (
+                (
+                  (
+                    sum by (service_namespace, k8s_pod_name, service_name) (
+                      rate(http_server_request_duration_count{http_response_status_code=~"5.."}[10m])
+                    )
+                    /
+                    sum by (service_namespace, k8s_pod_name, service_name) (
+                      rate(http_server_request_duration_count[10m])
+                    )
+                  )
+                  > 3 *
+                  (
+                    sum by (service_namespace, k8s_pod_name, service_name) (
+                      rate(http_server_request_duration_count{http_response_status_code=~"5.."}[2h])
+                    )
+                    /
+                    sum by (service_namespace, k8s_pod_name, service_name) (
+                      rate(http_server_request_duration_count[2h])
+                    )
+                  )
+                )
+                and
+                (
+                  (
+                    sum by (service_namespace, k8s_pod_name, service_name) (
+                      rate(http_server_request_duration_count{http_response_status_code=~"5.."}[10m])
+                    )
+                    /
+                    sum by (service_namespace, k8s_pod_name, service_name) (
+                      rate(http_server_request_duration_count[10m])
+                    )
+                  ) > 0.01
+                )
+                and
+                (
+                  sum by (service_namespace, k8s_pod_name, service_name) (
+                    rate(http_server_request_duration_count[10m])
+                  ) > 1
+                )
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "[Anomaly] Pod {{ $labels.service_namespace }}/{{ $labels.k8s_pod_name }} 5xx error rate kəskin artıb"
+              description: >-
+                Pod {{ $labels.k8s_pod_name }} ({{ $labels.service_name }})
+                5xx error rate {{ $value | humanizePercentage }} — 2 saatlıq
+                baseline-dan 3x artıq. Bu spesifik pod-da exception, dependency
+                failure, və ya resource exhaustion ola bilər. Hansı pod-un
+                xəta verdiyini dəqiq göstərir.
+
+          - alert: PodErrorRate4xxAnomaly
+            expr: |
+              (
+                (
+                  (
+                    sum by (service_namespace, k8s_pod_name, service_name) (
+                      rate(http_server_request_duration_count{http_response_status_code=~"4.."}[10m])
+                    )
+                    /
+                    sum by (service_namespace, k8s_pod_name, service_name) (
+                      rate(http_server_request_duration_count[10m])
+                    )
+                  )
+                  > 3 *
+                  (
+                    sum by (service_namespace, k8s_pod_name, service_name) (
+                      rate(http_server_request_duration_count{http_response_status_code=~"4.."}[2h])
+                    )
+                    /
+                    sum by (service_namespace, k8s_pod_name, service_name) (
+                      rate(http_server_request_duration_count[2h])
+                    )
+                  )
+                )
+                and
+                (
+                  (
+                    sum by (service_namespace, k8s_pod_name, service_name) (
+                      rate(http_server_request_duration_count{http_response_status_code=~"4.."}[10m])
+                    )
+                    /
+                    sum by (service_namespace, k8s_pod_name, service_name) (
+                      rate(http_server_request_duration_count[10m])
+                    )
+                  ) > 0.1
+                )
+                and
+                (
+                  sum by (service_namespace, k8s_pod_name, service_name) (
+                    rate(http_server_request_duration_count[10m])
+                  ) > 1
+                )
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[Anomaly] Pod {{ $labels.service_namespace }}/{{ $labels.k8s_pod_name }} 4xx error rate anomal artıb"
+              description: >-
+                Pod {{ $labels.k8s_pod_name }} ({{ $labels.service_name }})
+                4xx error rate {{ $value | humanizePercentage }} — 2 saatlıq
+                baseline-dan 3x artıq. Bu pod-da auth problemi, validation
+                failure, və ya broken client request pattern ola bilər.
+
+      # ================================================================
+      #  ROUTE-LEVEL LATENCY ANOMALY (SERVICE AGGREGATE)
+      #
+      #  Bütün podlar üzrə sum edilib, service_name + http_route-a görə
+      #  qruplaşdırılıb. Per-pod alert-dən fərqli olaraq service-in
+      #  ümumi vəziyyətini göstərir — bir pod yavaşlasa digərləri
+      #  kompensasiya edə bilər, amma bütün podlar yavaşlayırsa
+      #  bu alert tutur.
+      # ================================================================
+      - name: route-latency-anomaly
+        rules:
+          - alert: RouteLatencyP99SpikeAnomaly
+            expr: |
+              (
+                (
+                  histogram_quantile(0.99,
+                    sum by (le, service_namespace, service_name, http_route) (
+                      rate(http_server_request_duration_bucket[10m])
+                    )
+                  )
+                  > 3 *
+                  histogram_quantile(0.99,
+                    sum by (le, service_namespace, service_name, http_route) (
+                      rate(http_server_request_duration_bucket[2h])
+                    )
+                  )
+                )
+                and
+                (
+                  histogram_quantile(0.99,
+                    sum by (le, service_namespace, service_name, http_route) (
+                      rate(http_server_request_duration_bucket[2h])
+                    )
+                  ) > 0.01
+                )
+                and
+                (
+                  sum by (service_namespace, service_name, http_route) (
+                    rate(http_server_request_duration_count[10m])
+                  ) > 1
+                )
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[Anomaly] {{ $labels.service_name }} {{ $labels.http_route }} P99 latency kəskin artıb"
+              description: >-
+                Service {{ $labels.service_name }} ({{ $labels.service_namespace }})
+                {{ $labels.http_route }} endpoint P99 latency {{ $value | printf "%.2f" }}s —
+                2 saatlıq baseline-dan 3x artıq. Bütün podlar üzrə aggregate
+                nəticədir — endpoint səviyyəsində degradation var.
+
+          - alert: RouteLatencyP50SpikeAnomaly
+            expr: |
+              (
+                (
+                  histogram_quantile(0.50,
+                    sum by (le, service_namespace, service_name, http_route) (
+                      rate(http_server_request_duration_bucket[10m])
+                    )
+                  )
+                  > 2.5 *
+                  histogram_quantile(0.50,
+                    sum by (le, service_namespace, service_name, http_route) (
+                      rate(http_server_request_duration_bucket[2h])
+                    )
+                  )
+                )
+                and
+                (
+                  histogram_quantile(0.50,
+                    sum by (le, service_namespace, service_name, http_route) (
+                      rate(http_server_request_duration_bucket[2h])
+                    )
+                  ) > 0.005
+                )
+                and
+                (
+                  sum by (service_namespace, service_name, http_route) (
+                    rate(http_server_request_duration_count[10m])
+                  ) > 1
+                )
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[Anomaly] {{ $labels.service_name }} {{ $labels.http_route }} median latency 2.5x artıb"
+              description: >-
+                Service {{ $labels.service_name }} ({{ $labels.service_namespace }})
+                {{ $labels.http_route }} endpoint median (P50) latency
+                {{ $value | printf "%.3f" }}s — 2 saatlıq baseline-dan 2.5x artıq.
+                Bu endpoint-ə gedən requestlərin əksəriyyəti təsirlənir.
+
+      # ================================================================
+      #  ROUTE-LEVEL ERROR RATE ANOMALY (SERVICE AGGREGATE)
+      #
+      #  Bütün podlar üzrə sum edilib, service_name + http_route-a görə.
+      #  Bir pod-un error-u service-level rate-ə təsir etməyə bilər,
+      #  amma bütün podlarda eyni route error verirsə bu alert tutur.
+      # ================================================================
+      - name: route-error-rate-anomaly
+        rules:
+          - alert: RouteErrorRate5xxAnomaly
+            expr: |
+              (
+                (
+                  (
+                    sum by (service_namespace, service_name, http_route) (
+                      rate(http_server_request_duration_count{http_response_status_code=~"5.."}[10m])
+                    )
+                    /
+                    sum by (service_namespace, service_name, http_route) (
+                      rate(http_server_request_duration_count[10m])
+                    )
+                  )
+                  > 3 *
+                  (
+                    sum by (service_namespace, service_name, http_route) (
+                      rate(http_server_request_duration_count{http_response_status_code=~"5.."}[2h])
+                    )
+                    /
+                    sum by (service_namespace, service_name, http_route) (
+                      rate(http_server_request_duration_count[2h])
+                    )
+                  )
+                )
+                and
+                (
+                  (
+                    sum by (service_namespace, service_name, http_route) (
+                      rate(http_server_request_duration_count{http_response_status_code=~"5.."}[10m])
+                    )
+                    /
+                    sum by (service_namespace, service_name, http_route) (
+                      rate(http_server_request_duration_count[10m])
+                    )
+                  ) > 0.01
+                )
+                and
+                (
+                  sum by (service_namespace, service_name, http_route) (
+                    rate(http_server_request_duration_count[10m])
+                  ) > 1
+                )
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "[Anomaly] {{ $labels.service_name }} {{ $labels.http_route }} 5xx error rate kəskin artıb"
+              description: >-
+                Service {{ $labels.service_name }} ({{ $labels.service_namespace }})
+                {{ $labels.http_route }} endpoint 5xx error rate
+                {{ $value | humanizePercentage }} — 2 saatlıq baseline-dan 3x artıq.
+                Bütün podlar üzrə aggregate nəticədir — endpoint səviyyəsində
+                failure var.
+
+          - alert: RouteErrorRate4xxAnomaly
+            expr: |
+              (
+                (
+                  (
+                    sum by (service_namespace, service_name, http_route) (
+                      rate(http_server_request_duration_count{http_response_status_code=~"4.."}[10m])
+                    )
+                    /
+                    sum by (service_namespace, service_name, http_route) (
+                      rate(http_server_request_duration_count[10m])
+                    )
+                  )
+                  > 3 *
+                  (
+                    sum by (service_namespace, service_name, http_route) (
+                      rate(http_server_request_duration_count{http_response_status_code=~"4.."}[2h])
+                    )
+                    /
+                    sum by (service_namespace, service_name, http_route) (
+                      rate(http_server_request_duration_count[2h])
+                    )
+                  )
+                )
+                and
+                (
+                  (
+                    sum by (service_namespace, service_name, http_route) (
+                      rate(http_server_request_duration_count{http_response_status_code=~"4.."}[10m])
+                    )
+                    /
+                    sum by (service_namespace, service_name, http_route) (
+                      rate(http_server_request_duration_count[10m])
+                    )
+                  ) > 0.1
+                )
+                and
+                (
+                  sum by (service_namespace, service_name, http_route) (
+                    rate(http_server_request_duration_count[10m])
+                  ) > 1
+                )
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[Anomaly] {{ $labels.service_name }} {{ $labels.http_route }} 4xx error rate anomal artıb"
+              description: >-
+                Service {{ $labels.service_name }} ({{ $labels.service_namespace }})
+                {{ $labels.http_route }} endpoint 4xx error rate
+                {{ $value | humanizePercentage }} — 2 saatlıq baseline-dan 3x artıq.
+                API change sonrası broken client, auth problemi, və ya
+                validation failure ola bilər.
