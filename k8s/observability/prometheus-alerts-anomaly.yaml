@@ -556,36 +556,36 @@ data:
             expr: |
               (
                 (
-                  sum by (namespace, pod, cluster) (
+                  sum by (namespace, cluster) (
                     rate(container_network_receive_bytes_total[10m])
                   )
                   > 5 *
-                  sum by (namespace, pod, cluster) (
+                  sum by (namespace, cluster) (
                     rate(container_network_receive_bytes_total[10m] offset 7d)
                   )
                 )
                 and
                 (
-                  sum by (namespace, pod, cluster) (
+                  sum by (namespace, cluster) (
                     rate(container_network_receive_bytes_total[10m])
                   ) > 1024 * 1024
                 )
                 and
                 (
-                  sum by (namespace, pod, cluster) (
+                  sum by (namespace, cluster) (
                     rate(container_network_receive_bytes_total[10m] offset 7d)
                   ) > 100 * 1024
                 )
               )
-              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
-              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod"})
             for: 10m
             labels:
               severity: warning
             annotations:
-              summary: "[Anomaly] {{ $labels.namespace }}/{{ $labels.pod }} network receive traffic anomal artıb"
+              summary: "[Anomaly] {{ $labels.namespace }} network receive traffic anomal artıb"
               description: >-
-                Pod {{ $labels.namespace }}/{{ $labels.pod }} keçən həftənin eyni
+                Namespace {{ $labels.namespace }} keçən həftənin eyni
                 gün/saatından 5x çox network traffic alır (hazırda > 1MB/s).
                 DDoS, data dump, və ya misconfigured client ola bilər.
                 Cluster: {{ $labels.cluster }}.
@@ -594,36 +594,36 @@ data:
             expr: |
               (
                 (
-                  sum by (namespace, pod, cluster) (
+                  sum by (namespace, cluster) (
                     rate(container_network_transmit_bytes_total[10m])
                   )
                   > 5 *
-                  sum by (namespace, pod, cluster) (
+                  sum by (namespace, cluster) (
                     rate(container_network_transmit_bytes_total[10m] offset 7d)
                   )
                 )
                 and
                 (
-                  sum by (namespace, pod, cluster) (
+                  sum by (namespace, cluster) (
                     rate(container_network_transmit_bytes_total[10m])
                   ) > 1024 * 1024
                 )
                 and
                 (
-                  sum by (namespace, pod, cluster) (
+                  sum by (namespace, cluster) (
                     rate(container_network_transmit_bytes_total[10m] offset 7d)
                   ) > 100 * 1024
                 )
               )
-              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
-              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod"})
             for: 10m
             labels:
               severity: warning
             annotations:
-              summary: "[Anomaly] {{ $labels.namespace }}/{{ $labels.pod }} network transmit traffic anomal artıb"
+              summary: "[Anomaly] {{ $labels.namespace }} network transmit traffic anomal artıb"
               description: >-
-                Pod {{ $labels.namespace }}/{{ $labels.pod }} keçən həftənin eyni
+                Namespace {{ $labels.namespace }} keçən həftənin eyni
                 gün/saatından 5x çox network traffic göndərir (hazırda > 1MB/s).
                 Data exfiltration, log flood, və ya anormal response size ola
                 bilər. Cluster: {{ $labels.cluster }}.

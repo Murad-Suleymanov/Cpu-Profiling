@@ -236,11 +236,11 @@ data:
             expr: |
               (
                 (
-                  container_fs_usage_bytes{container!="", image!=""}
-                  / container_fs_limit_bytes{container!="", image!=""}
+                  container_fs_usage_bytes{pod!="", image!=""}
+                  / container_fs_limit_bytes{pod!="", image!=""}
                 ) > 0.85
                 and
-                container_fs_limit_bytes{container!="", image!=""} > 0
+                container_fs_limit_bytes{pod!="", image!=""} > 0
               )
               * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
               max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})

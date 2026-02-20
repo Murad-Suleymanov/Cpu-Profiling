@@ -731,7 +731,11 @@ data:
 
           - alert: CronJobSuspended
             expr: |
-              kube_cronjob_spec_suspend == 1
+              (
+                kube_cronjob_spec_suspend == 1
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod"})
             for: 24h
             labels:
               severity: info
@@ -2926,11 +2930,11 @@ data:
             expr: |
               (
                 (
-                  container_fs_usage_bytes{container!="", device=~"/dev/.*"}
+                  container_fs_usage_bytes{pod!="", device=~"/dev/.*"}
                   /
-                  container_fs_limit_bytes{container!="", device=~"/dev/.*"}
+                  container_fs_limit_bytes{pod!="", device=~"/dev/.*"}
                 ) > 0.85
-                and container_fs_limit_bytes{container!="", device=~"/dev/.*"} > 0
+                and container_fs_limit_bytes{pod!="", device=~"/dev/.*"} > 0
               )
               * on(namespace, pod) group_left(team, squad, tribe, environment)
               max by (namespace, pod, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
@@ -2948,11 +2952,11 @@ data:
             expr: |
               (
                 (
-                  container_fs_usage_bytes{container!="", device=~"/dev/.*"}
+                  container_fs_usage_bytes{pod!="", device=~"/dev/.*"}
                   /
-                  container_fs_limit_bytes{container!="", device=~"/dev/.*"}
+                  container_fs_limit_bytes{pod!="", device=~"/dev/.*"}
                 ) > 0.95
-                and container_fs_limit_bytes{container!="", device=~"/dev/.*"} > 0
+                and container_fs_limit_bytes{pod!="", device=~"/dev/.*"} > 0
               )
               * on(namespace, pod) group_left(team, squad, tribe, environment)
               max by (namespace, pod, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
@@ -3401,87 +3405,95 @@ data:
           - alert: ContainerHighNetworkReceiveBandwidth
             expr: |
               (
-                sum by (namespace, pod) (
+                sum by (namespace) (
                   rate(container_network_receive_bytes_total{interface!="lo"}[5m])
                 ) > 100 * 1024 * 1024
               )
-              * on(namespace, pod) group_left(team, squad, tribe, environment)
-              max by (namespace, pod, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+              * on(namespace) group_left()
+              max by (namespace) (kube_pod_labels{environment="prod"})
             for: 15m
             labels:
               severity: info
             annotations:
-              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} yüksək network receive"
+              summary: "Namespace {{ $labels.namespace }} yüksək network receive"
               description: >-
-                Pod {{ $labels.namespace }}/{{ $labels.pod }}
+                Namespace {{ $labels.namespace }}
                 is receiving {{ $value | humanize }}B/s of network traffic.
 
           - alert: ContainerHighNetworkTransmitBandwidth
             expr: |
               (
-                sum by (namespace, pod) (
+                sum by (namespace) (
                   rate(container_network_transmit_bytes_total{interface!="lo"}[5m])
                 ) > 100 * 1024 * 1024
               )
-              * on(namespace, pod) group_left(team, squad, tribe, environment)
-              max by (namespace, pod, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+              * on(namespace) group_left()
+              max by (namespace) (kube_pod_labels{environment="prod"})
             for: 15m
             labels:
               severity: info
             annotations:
-              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} yüksək network transmit"
+              summary: "Namespace {{ $labels.namespace }} yüksək network transmit"
               description: >-
-                Pod {{ $labels.namespace }}/{{ $labels.pod }}
+                Namespace {{ $labels.namespace }}
                 is transmitting {{ $value | humanize }}B/s of network traffic.
 
           - alert: ContainerHighNetworkReceiveErrors
             expr: |
-              (increase(container_network_receive_errors_total{interface!="lo"}[5m]) > 0)
-              * on(namespace, pod) group_left(team, squad, tribe, environment)
-              max by (namespace, pod, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+              (
+                sum by (namespace) (
+                  increase(container_network_receive_errors_total{interface!="lo"}[5m])
+                ) > 0
+              )
+              * on(namespace) group_left()
+              max by (namespace) (kube_pod_labels{environment="prod"})
             for: 10m
             labels:
               severity: warning
             annotations:
-              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} network receive xətaları"
+              summary: "Namespace {{ $labels.namespace }} network receive xətaları"
               description: >-
-                Pod {{ $labels.namespace }}/{{ $labels.pod }}
+                Namespace {{ $labels.namespace }}
                 has {{ $value | printf "%.0f" }} network receive errors
                 in the last 5 minutes. Check network configuration.
 
           - alert: ContainerHighNetworkTransmitErrors
             expr: |
-              (increase(container_network_transmit_errors_total{interface!="lo"}[5m]) > 0)
-              * on(namespace, pod) group_left(team, squad, tribe, environment)
-              max by (namespace, pod, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+              (
+                sum by (namespace) (
+                  increase(container_network_transmit_errors_total{interface!="lo"}[5m])
+                ) > 0
+              )
+              * on(namespace) group_left()
+              max by (namespace) (kube_pod_labels{environment="prod"})
             for: 10m
             labels:
               severity: warning
             annotations:
-              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} network transmit xətaları"
+              summary: "Namespace {{ $labels.namespace }} network transmit xətaları"
               description: >-
-                Pod {{ $labels.namespace }}/{{ $labels.pod }}
+                Namespace {{ $labels.namespace }}
                 has {{ $value | printf "%.0f" }} network transmit errors
                 in the last 5 minutes.
 
           - alert: ContainerNetworkPacketDrops
             expr: |
               (
-                (
+                sum by (namespace) (
                   increase(container_network_receive_packets_dropped_total{interface!="lo"}[5m])
                   +
                   increase(container_network_transmit_packets_dropped_total{interface!="lo"}[5m])
                 ) > 100
               )
-              * on(namespace, pod) group_left(team, squad, tribe, environment)
-              max by (namespace, pod, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+              * on(namespace) group_left()
+              max by (namespace) (kube_pod_labels{environment="prod"})
             for: 10m
             labels:
               severity: warning
             annotations:
-              summary: "Pod {{ $labels.namespace }}/{{ $labels.pod }} packet drop var"
+              summary: "Namespace {{ $labels.namespace }} packet drop var"
               description: >-
-                Pod {{ $labels.namespace }}/{{ $labels.pod }}
+                Namespace {{ $labels.namespace }}
                 has {{ $value | printf "%.0f" }} dropped packets
                 in the last 5 minutes. Network congestion or misconfiguration.
 
