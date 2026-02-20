@@ -1,0 +1,1066 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-alerts-utilization
+  namespace: observability
+data:
+  utilization-alerts.yml: |
+    groups:
+      # ================================================================
+      #  JVM HEAP UTILIZATION
+      #
+      #  Mənbə: OTel Java auto-instrumentation
+      #  Metrik: jvm_memory_used, jvm_memory_limit, jvm_memory_committed
+      #  Alloy-da add_metric_suffixes=false → _bytes suffix-siz gəlir.
+      #  ContainerHighMemory (prometheus-alerts.yaml) cgroups səviyyəsidir
+      #  — JVM heap-dən fərqlidir.
+      # ================================================================
+      - name: jvm-heap-utilization
+        rules:
+          - alert: JVMHeapUtilizationHigh
+            expr: |
+              (
+                (
+                  sum by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_memory_used{jvm_memory_type="heap"}
+                  )
+                  /
+                  sum by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_memory_limit{jvm_memory_type="heap"}
+                  )
+                ) > 0.80
+                and on(service_namespace, k8s_pod_name, service_name)
+                sum by (service_namespace, k8s_pod_name, service_name) (
+                  jvm_memory_limit{jvm_memory_type="heap"}
+                ) > 0
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[JVM] {{ $labels.k8s_pod_name }} heap {{ $value | humanizePercentage }}"
+              description: >-
+                Pod {{ $labels.k8s_pod_name }} ({{ $labels.service_name }})
+                JVM heap 15+ dəqiqədir > 80%. GC frequency artacaq,
+                response time degrade olacaq.
+
+          - alert: JVMHeapUtilizationCritical
+            expr: |
+              (
+                (
+                  sum by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_memory_used{jvm_memory_type="heap"}
+                  )
+                  /
+                  sum by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_memory_limit{jvm_memory_type="heap"}
+                  )
+                ) > 0.90
+                and on(service_namespace, k8s_pod_name, service_name)
+                sum by (service_namespace, k8s_pod_name, service_name) (
+                  jvm_memory_limit{jvm_memory_type="heap"}
+                ) > 0
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 10m
+            labels:
+              severity: critical
+            annotations:
+              summary: "[JVM] {{ $labels.k8s_pod_name }} heap kritik — {{ $value | humanizePercentage }}"
+              description: >-
+                Pod {{ $labels.k8s_pod_name }} ({{ $labels.service_name }})
+                JVM heap 10+ dəqiqədir > 90%. Full GC storm və
+                OutOfMemoryError riski çox yüksəkdir.
+
+          - alert: JVMOldGenUtilizationHigh
+            expr: |
+              (
+                (
+                  max by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_memory_used{jvm_memory_type="heap", jvm_memory_pool_name=~".*Old Gen.*|.*Tenured.*"}
+                  )
+                  /
+                  max by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_memory_limit{jvm_memory_type="heap", jvm_memory_pool_name=~".*Old Gen.*|.*Tenured.*"}
+                  )
+                ) > 0.80
+                and on(service_namespace, k8s_pod_name, service_name)
+                max by (service_namespace, k8s_pod_name, service_name) (
+                  jvm_memory_limit{jvm_memory_type="heap", jvm_memory_pool_name=~".*Old Gen.*|.*Tenured.*"}
+                ) > 0
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[JVM] {{ $labels.k8s_pod_name }} Old Gen {{ $value | humanizePercentage }}"
+              description: >-
+                Pod {{ $labels.k8s_pod_name }} ({{ $labels.service_name }})
+                Old Gen 15+ dəqiqədir > 80%. Full GC (stop-the-world)
+                tez-tez baş verəcək.
+
+          - alert: JVMMetaspaceUtilizationHigh
+            expr: |
+              (
+                (
+                  max by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_memory_used{jvm_memory_type="non_heap", jvm_memory_pool_name=~".*Metaspace.*"}
+                  )
+                  /
+                  max by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_memory_limit{jvm_memory_type="non_heap", jvm_memory_pool_name=~".*Metaspace.*"}
+                  )
+                ) > 0.85
+                and on(service_namespace, k8s_pod_name, service_name)
+                max by (service_namespace, k8s_pod_name, service_name) (
+                  jvm_memory_limit{jvm_memory_type="non_heap", jvm_memory_pool_name=~".*Metaspace.*"}
+                ) > 0
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[JVM] {{ $labels.k8s_pod_name }} Metaspace {{ $value | humanizePercentage }}"
+              description: >-
+                Pod {{ $labels.k8s_pod_name }} ({{ $labels.service_name }})
+                Metaspace 15+ dəqiqədir > 85%. Classloader leak, dynamic
+                proxy, və ya reflection problemi ola bilər.
+
+      # ================================================================
+      #  JVM THREAD & CPU UTILIZATION
+      # ================================================================
+      - name: jvm-thread-cpu-utilization
+        rules:
+          - alert: JVMBlockedThreadsHigh
+            expr: |
+              (
+                (
+                  sum by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_thread_count{jvm_thread_state="blocked"}
+                  )
+                  /
+                  sum by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_thread_count
+                  )
+                ) > 0.10
+                and on(service_namespace, k8s_pod_name, service_name)
+                sum by (service_namespace, k8s_pod_name, service_name) (
+                  jvm_thread_count{jvm_thread_state="blocked"}
+                ) > 5
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[JVM] {{ $labels.k8s_pod_name }} thread-lərin {{ $value | humanizePercentage }}-i BLOCKED"
+              description: >-
+                Pod {{ $labels.k8s_pod_name }} ({{ $labels.service_name }})
+                thread-lərin > 10%-i BLOCKED. Synchronized block, DB lock,
+                və ya shared resource contention.
+
+          - alert: JVMThreadCountVeryHigh
+            expr: |
+              (
+                sum by (service_namespace, k8s_pod_name, service_name) (
+                  jvm_thread_count
+                ) > 1000
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[JVM] {{ $labels.k8s_pod_name }} {{ $value | printf \"%.0f\" }} thread"
+              description: >-
+                Pod {{ $labels.k8s_pod_name }} ({{ $labels.service_name }})
+                JVM-də 15+ dəqiqədir > 1000 thread. Thread pool leak
+                və ya unbounded executor ola bilər.
+
+          - alert: JVMCPUUtilizationHigh
+            expr: |
+              (
+                max by (service_namespace, k8s_pod_name, service_name) (
+                  jvm_cpu_recent_utilization
+                ) > 0.80
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[JVM] {{ $labels.k8s_pod_name }} CPU {{ $value | humanizePercentage }}"
+              description: >-
+                Pod {{ $labels.k8s_pod_name }} ({{ $labels.service_name }})
+                JVM process CPU 15+ dəqiqədir > 80%.
+
+      # ================================================================
+      #  JVM DEVELOPER ALERTS
+      #
+      #  Kod səviyyəli problemləri erkən aşkar edən xəbərdarlıqlar.
+      # ================================================================
+      - name: jvm-developer-alerts
+        rules:
+          - alert: JVMHeapMemoryLeakSuspected
+            expr: |
+              (
+                (
+                  sum by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_memory_used{jvm_memory_type="heap"}
+                  )
+                  -
+                  sum by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_memory_used{jvm_memory_type="heap"} offset 30m
+                  )
+                ) > 500 * 1024 * 1024
+                and on(service_namespace, k8s_pod_name, service_name)
+                (
+                  sum by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_memory_used{jvm_memory_type="heap"}
+                  )
+                  /
+                  sum by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_memory_limit{jvm_memory_type="heap"}
+                  )
+                ) > 0.60
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[JVM-Dev] {{ $labels.k8s_pod_name }} heap 30 dəq-də > 500MB artıb"
+              description: >-
+                Pod {{ $labels.k8s_pod_name }} ({{ $labels.service_name }})
+                heap son 30 dəqiqədə > 500MB artıb və > 60% doludur.
+                Memory leak ehtimalı — heap dump götürüb araşdırın.
+
+          - alert: JVMNonHeapMemoryGrowing
+            expr: |
+              (
+                (
+                  sum by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_memory_used{jvm_memory_type="non_heap"}
+                  )
+                  -
+                  sum by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_memory_used{jvm_memory_type="non_heap"} offset 1h
+                  )
+                ) > 50 * 1024 * 1024
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[JVM-Dev] {{ $labels.k8s_pod_name }} non-heap 1 saatda > 50MB artıb"
+              description: >-
+                Pod {{ $labels.k8s_pod_name }} ({{ $labels.service_name }})
+                non-heap (Metaspace + Code Cache) son 1 saatda > 50MB artıb.
+                Classloader leak və ya dynamic proxy problemi ola bilər.
+
+          - alert: JVMDirectBufferMemoryHigh
+            expr: |
+              (
+                (
+                  max by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_buffer_memory_used{jvm_buffer_pool_name="direct"}
+                  )
+                  /
+                  max by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_buffer_memory_limit{jvm_buffer_pool_name="direct"}
+                  )
+                ) > 0.80
+                and on(service_namespace, k8s_pod_name, service_name)
+                max by (service_namespace, k8s_pod_name, service_name) (
+                  jvm_buffer_memory_limit{jvm_buffer_pool_name="direct"}
+                ) > 0
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[JVM-Dev] {{ $labels.k8s_pod_name }} direct buffer {{ $value | humanizePercentage }}"
+              description: >-
+                Pod {{ $labels.k8s_pod_name }} ({{ $labels.service_name }})
+                NIO direct buffer > 80%. OutOfMemoryError: Direct buffer
+                memory riski var.
+
+          - alert: JVMWaitingThreadsDominant
+            expr: |
+              (
+                (
+                  sum by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_thread_count{jvm_thread_state="waiting"}
+                  )
+                  /
+                  sum by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_thread_count
+                  )
+                ) > 0.50
+                and on(service_namespace, k8s_pod_name, service_name)
+                sum by (service_namespace, k8s_pod_name, service_name) (
+                  jvm_thread_count{jvm_thread_state="waiting"}
+                ) > 50
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[JVM-Dev] {{ $labels.k8s_pod_name }} thread-lərin > 50%-i WAITING"
+              description: >-
+                Pod {{ $labels.k8s_pod_name }} ({{ $labels.service_name }})
+                thread-lərin yarıdan çoxu WAITING state-dədir. Connection
+                pool exhaustion və ya downstream service cavab vermir.
+
+          - alert: JVMThreadCountSpike
+            expr: |
+              (
+                (
+                  sum by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_thread_count
+                  )
+                  -
+                  sum by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_thread_count offset 15m
+                  )
+                ) > 200
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[JVM-Dev] {{ $labels.k8s_pod_name }} 15 dəq-də > 200 yeni thread"
+              description: >-
+                Pod {{ $labels.k8s_pod_name }} ({{ $labels.service_name }})
+                thread sayı qısa müddətdə > 200 artıb. Thread pool leak
+                və ya connection storm ola bilər.
+
+          - alert: JVMCommittedHeapNearLimit
+            expr: |
+              (
+                (
+                  sum by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_memory_committed{jvm_memory_type="heap"}
+                  )
+                  /
+                  sum by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_memory_limit{jvm_memory_type="heap"}
+                  )
+                ) > 0.90
+                and on(service_namespace, k8s_pod_name, service_name)
+                sum by (service_namespace, k8s_pod_name, service_name) (
+                  jvm_memory_limit{jvm_memory_type="heap"}
+                ) > 0
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[JVM-Dev] {{ $labels.k8s_pod_name }} committed heap {{ $value | humanizePercentage }}"
+              description: >-
+                Pod {{ $labels.k8s_pod_name }} ({{ $labels.service_name }})
+                committed heap limit-in > 90%-idir. JVM genişlənə bilmir —
+                GC agressivləşəcək. -Xmx artırın.
+
+          - alert: JVMClassLoadingContinuous
+            expr: |
+              (
+                (
+                  max by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_class_loaded
+                  )
+                  -
+                  max by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_class_loaded offset 1h
+                  )
+                ) > 2000
+                and on(service_namespace, k8s_pod_name, service_name)
+                max by (service_namespace, k8s_pod_name, service_name) (
+                  jvm_class_loaded
+                ) > 10000
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[JVM-Dev] {{ $labels.k8s_pod_name }} 1 saatda > 2000 yeni class"
+              description: >-
+                Pod {{ $labels.k8s_pod_name }} ({{ $labels.service_name }})
+                son 1 saatda > 2000 class yüklənib. Classloader leak
+                və ya dynamic proxy problemi — Metaspace OOM riski.
+
+          - alert: JVMHighCPUWithBlockedThreads
+            expr: |
+              (
+                max by (service_namespace, k8s_pod_name, service_name) (
+                  jvm_cpu_recent_utilization
+                ) > 0.70
+                and on(service_namespace, k8s_pod_name, service_name)
+                sum by (service_namespace, k8s_pod_name, service_name) (
+                  jvm_thread_count{jvm_thread_state="blocked"}
+                ) > 10
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[JVM-Dev] {{ $labels.k8s_pod_name }} yüksək CPU + blocked threads"
+              description: >-
+                Pod {{ $labels.k8s_pod_name }} ({{ $labels.service_name }})
+                CPU > 70% + > 10 thread BLOCKED. Lock contention CPU-nu
+                boş yerə yandırır — async-profiler ilə hot lock tapın.
+
+      # ================================================================
+      #  DB CONNECTION POOL UTILIZATION
+      #
+      #  OTel auto-instrumentation (HikariCP, Tomcat JDBC, etc.)
+      #  DB pool metriklərində service_namespace/k8s_pod_name yoxdur,
+      #  ona görə job label-ı ilə kube_pod_labels-a join edirik.
+      # ================================================================
+      - name: db-connection-pool-utilization
+        rules:
+          - alert: DBConnectionPoolUtilizationHigh
+            expr: |
+              (
+                (
+                  sum without (state) (db_client_connections_usage{state="used"})
+                  /
+                  db_client_connections_max
+                ) > 0.80
+                and
+                db_client_connections_max > 0
+              )
+              * on(job) group_left()
+              label_replace(
+                max by (label_app) (kube_pod_labels{environment="prod", team="Fintech-Sre"}),
+                "job", "$1", "label_app", "(.*)"
+              )
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[DB Pool] {{ $labels.service_name }} ({{ $labels.service_instance_id }}) {{ $value | humanizePercentage }}"
+              description: >-
+                Service {{ $labels.service_name }} DB pool ({{ $labels.pool_name }})
+                10+ dəqiqədir > 80%. Pool tükəndikdə requestlər
+                connection gözləyəcək.
+
+          - alert: DBConnectionPoolExhausted
+            expr: |
+              (
+                (
+                  sum without (state) (db_client_connections_usage{state="used"})
+                  /
+                  db_client_connections_max
+                ) > 0.95
+                and
+                db_client_connections_max > 0
+              )
+              * on(job) group_left()
+              label_replace(
+                max by (label_app) (kube_pod_labels{environment="prod", team="Fintech-Sre"}),
+                "job", "$1", "label_app", "(.*)"
+              )
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "[DB Pool] {{ $labels.service_name }} ({{ $labels.service_instance_id }}) tükənib — {{ $value | humanizePercentage }}"
+              description: >-
+                Service {{ $labels.service_name }} DB pool ({{ $labels.pool_name }})
+                > 95%. Cascading failure riski.
+
+          - alert: DBConnectionPoolPendingRequests
+            expr: |
+              (
+                max by (service_name, service_instance_id, pool_name, job) (
+                  db_client_connections_pending_requests
+                ) > 0
+              )
+              * on(job) group_left()
+              label_replace(
+                max by (label_app) (kube_pod_labels{environment="prod", team="Fintech-Sre"}),
+                "job", "$1", "label_app", "(.*)"
+              )
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[DB Pool] {{ $labels.service_name }} ({{ $labels.service_instance_id }}) pending requests"
+              description: >-
+                Service {{ $labels.service_name }} DB pool-da ({{ $labels.pool_name }})
+                10+ dəqiqədir pending request var. Thread-lər connection gözləyir.
+
+      # ================================================================
+      #  NODE DISK I/O UTILIZATION
+      #
+      #  node_cpu_seconds_total{mode="iowait"} — CPU-nun disk I/O
+      #  gözləməklə keçirdiyi vaxt. prometheus-alerts.yaml-da disk write
+      #  throughput (container_fs_writes_bytes_total) var — bu fərqlidir:
+      #  CPU-nun I/O üçün bloklanma faizini ölçür.
+      # ================================================================
+      - name: node-disk-io-utilization
+        rules:
+          - alert: NodeHighIOWait
+            expr: |
+              (
+                avg by (node, cluster) (
+                  rate(node_cpu_seconds_total{mode="iowait"}[5m])
+                )
+                /
+                avg by (node, cluster) (
+                  rate(node_cpu_seconds_total[5m])
+                ) > 0.10
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Node {{ $labels.node }} I/O wait {{ $value | humanizePercentage }}"
+              description: >-
+                Node {{ $labels.node }} CPU vaxtının {{ $value | humanizePercentage }}-i
+                disk I/O gözləməklə keçir. Disk bottleneck.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: NodeCriticalIOWait
+            expr: |
+              (
+                avg by (node, cluster) (
+                  rate(node_cpu_seconds_total{mode="iowait"}[5m])
+                )
+                /
+                avg by (node, cluster) (
+                  rate(node_cpu_seconds_total[5m])
+                ) > 0.25
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Node {{ $labels.node }} I/O wait kritik — {{ $value | humanizePercentage }}"
+              description: >-
+                Node {{ $labels.node }} disk I/O tamamilə saturated.
+                Cluster: {{ $labels.cluster }}.
+
+      # ================================================================
+      #  CLUSTER ACTUAL UTILIZATION
+      #
+      #  prometheus-alerts.yaml-da ClusterCPU/MemCapacityLow var —
+      #  onlar REQUEST-based (scheduling). Burada ACTUAL usage.
+      # ================================================================
+      - name: cluster-actual-utilization
+        rules:
+          - alert: ClusterActualCPUUtilizationHigh
+            expr: |
+              (
+                (
+                  1 - (
+                    sum by (cluster) (
+                      rate(node_cpu_seconds_total{mode="idle"}[5m])
+                    )
+                    /
+                    count by (cluster) (
+                      node_cpu_seconds_total{mode="idle"}
+                    )
+                  )
+                ) > 0.70
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 30m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Cluster actual CPU {{ $value | humanizePercentage }}"
+              description: >-
+                Cluster faktiki CPU istifadəsi 30+ dəqiqədir > 70%.
+                Headroom azalır. Cluster: {{ $labels.cluster }}.
+
+          - alert: ClusterActualMemoryUtilizationHigh
+            expr: |
+              (
+                (
+                  1 - (
+                    sum by (cluster) (node_memory_MemAvailable_bytes)
+                    /
+                    sum by (cluster) (node_memory_MemTotal_bytes)
+                  )
+                ) > 0.80
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 30m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Cluster actual memory {{ $value | humanizePercentage }}"
+              description: >-
+                Cluster faktiki memory istifadəsi 30+ dəqiqədir > 80%.
+                OOM risk artır. Cluster: {{ $labels.cluster }}.
+
+      # ================================================================
+      #  NAMESPACE ACTUAL UTILIZATION
+      #
+      #  Faktiki CPU/Memory istifadəsi vs request-lər. Team/service
+      #  səviyyəsində resource waste/undersize aşkar edir.
+      # ================================================================
+      - name: namespace-actual-utilization
+        rules:
+          - alert: NamespaceHighCPUActualUtilization
+            expr: |
+              (
+                (
+                  sum by (namespace, cluster) (
+                    rate(container_cpu_usage_seconds_total{container!="", image!=""}[5m])
+                  )
+                  /
+                  sum by (namespace, cluster) (
+                    kube_pod_container_resource_requests{resource="cpu"}
+                  )
+                ) > 2
+                and on(namespace, cluster)
+                sum by (namespace, cluster) (
+                  rate(container_cpu_usage_seconds_total{container!="", image!=""}[5m])
+                ) > 1
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 30m
+            labels:
+              severity: warning
+            annotations:
+              summary: "NS {{ $labels.namespace }} CPU request-in {{ $value | printf \"%.1f\" }}x-i"
+              description: >-
+                Namespace {{ $labels.namespace }} faktiki CPU istifadəsi
+                request-lərdən {{ $value | printf "%.1f" }}x çoxdur.
+                Request-lər undersized-dır. Cluster: {{ $labels.cluster }}.
+
+          - alert: NamespaceHighMemoryActualUtilization
+            expr: |
+              (
+                (
+                  sum by (namespace, cluster) (
+                    container_memory_working_set_bytes{container!="", image!=""}
+                  )
+                  /
+                  sum by (namespace, cluster) (
+                    kube_pod_container_resource_requests{resource="memory"}
+                  )
+                ) > 2
+                and on(namespace, cluster)
+                sum by (namespace, cluster) (
+                  container_memory_working_set_bytes{container!="", image!=""}
+                ) > 500 * 1024 * 1024
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 30m
+            labels:
+              severity: warning
+            annotations:
+              summary: "NS {{ $labels.namespace }} memory request-in {{ $value | printf \"%.1f\" }}x-i"
+              description: >-
+                Namespace {{ $labels.namespace }} faktiki memory istifadəsi
+                (> 500Mi) request-lərdən {{ $value | printf "%.1f" }}x çoxdur.
+                OOM riski yüksəkdir. Cluster: {{ $labels.cluster }}.
+
+      # ================================================================
+      #  HTTP LATENCY & ERROR ALERTS
+      #
+      #  Eyni OTel Java agent-dən gələn http_server_request_duration.
+      #  anomaly.yaml-da anomaly-based versiyaları var — burada
+      #  fixed threshold-lar.
+      # ================================================================
+      - name: http-latency-alerts
+        rules:
+          - alert: HTTPServerP99LatencyHigh
+            expr: |
+              (
+                histogram_quantile(0.99,
+                  sum by (le, service_namespace, service_name) (
+                    rate(http_server_request_duration_bucket[5m])
+                  )
+                ) > 2
+                and on(service_namespace, service_name)
+                sum by (service_namespace, service_name) (
+                  rate(http_server_request_duration_count[5m])
+                ) > 0.1
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[Latency] {{ $labels.service_name }} P99 = {{ $value | printf \"%.2f\" }}s"
+              description: >-
+                Service {{ $labels.service_name }} P99 latency 10+ dəqiqədir
+                > 2s. Downstream yavaşlayıb, DB slow, və ya GC pressure.
+
+          - alert: HTTPServerP99LatencyCritical
+            expr: |
+              (
+                histogram_quantile(0.99,
+                  sum by (le, service_namespace, service_name) (
+                    rate(http_server_request_duration_bucket[5m])
+                  )
+                ) > 5
+                and on(service_namespace, service_name)
+                sum by (service_namespace, service_name) (
+                  rate(http_server_request_duration_count[5m])
+                ) > 0.1
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "[Latency] {{ $labels.service_name }} P99 kritik — {{ $value | printf \"%.2f\" }}s"
+              description: >-
+                Service {{ $labels.service_name }} P99 latency > 5s.
+
+          - alert: HTTPServerSlowEndpoint
+            expr: |
+              (
+                histogram_quantile(0.99,
+                  sum by (le, service_namespace, service_name, http_route) (
+                    rate(http_server_request_duration_bucket[5m])
+                  )
+                ) > 3
+                and on(service_namespace, service_name, http_route)
+                sum by (service_namespace, service_name, http_route) (
+                  rate(http_server_request_duration_count[5m])
+                ) > 0.05
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[Latency] {{ $labels.service_name }} {{ $labels.http_route }} P99 = {{ $value | printf \"%.2f\" }}s"
+              description: >-
+                Endpoint {{ $labels.http_route }} P99 > 3s. Slow query,
+                N+1 problem, və ya external call ola bilər.
+
+          - alert: HTTPServerErrorRateHigh
+            expr: |
+              (
+                (
+                  sum by (service_namespace, service_name) (
+                    rate(http_server_request_duration_count{http_response_status_code=~"5.."}[5m])
+                  )
+                  /
+                  sum by (service_namespace, service_name) (
+                    rate(http_server_request_duration_count[5m])
+                  )
+                ) > 0.05
+                and on(service_namespace, service_name)
+                sum by (service_namespace, service_name) (
+                  rate(http_server_request_duration_count[5m])
+                ) > 0.1
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "[Error] {{ $labels.service_name }} 5xx rate = {{ $value | humanizePercentage }}"
+              description: >-
+                Service {{ $labels.service_name }} 5xx error rate > 5%.
+                Dependency failure və ya resource exhaustion yoxlayın.
+
+          - alert: HTTPServerErrorRateEndpoint
+            expr: |
+              (
+                (
+                  sum by (service_namespace, service_name, http_route) (
+                    rate(http_server_request_duration_count{http_response_status_code=~"5.."}[5m])
+                  )
+                  /
+                  sum by (service_namespace, service_name, http_route) (
+                    rate(http_server_request_duration_count[5m])
+                  )
+                ) > 0.10
+                and on(service_namespace, service_name, http_route)
+                sum by (service_namespace, service_name, http_route) (
+                  rate(http_server_request_duration_count[5m])
+                ) > 0.05
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[Error] {{ $labels.service_name }} {{ $labels.http_route }} 5xx = {{ $value | humanizePercentage }}"
+              description: >-
+                Endpoint {{ $labels.http_route }} 5xx error rate > 10%.
+                Bu endpoint-ə spesifik problem var.
+
+      # ================================================================
+      #  HTTP CLIENT (DOWNSTREAM) ALERTS
+      #
+      #  OTel Java agent http_client_request_duration metric-i ilə
+      #  downstream servis-lərə gedən çağrıları izləyir.
+      #  "Hansı dependency yavaşdır?" sualına cavab verir.
+      #  server_address label-ı downstream host-u göstərir.
+      # ================================================================
+      - name: http-client-downstream-alerts
+        rules:
+          - alert: HTTPClientDownstreamP99High
+            expr: |
+              (
+                histogram_quantile(0.99,
+                  sum by (le, service_namespace, service_name, server_address) (
+                    rate(http_client_request_duration_bucket[5m])
+                  )
+                ) > 2
+                and on(service_namespace, service_name, server_address)
+                sum by (service_namespace, service_name, server_address) (
+                  rate(http_client_request_duration_count[5m])
+                ) > 0.05
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[Downstream] {{ $labels.service_name }} → {{ $labels.server_address }} P99 = {{ $value | printf \"%.2f\" }}s"
+              description: >-
+                Service {{ $labels.service_name }} downstream
+                {{ $labels.server_address }}-a edilən çağrılar P99 > 2s.
+                Downstream yavaşlayıb — DB, cache, və ya xarici API
+                ola bilər. Dependency health yoxlayın.
+
+          - alert: HTTPClientDownstreamTimeout
+            expr: |
+              (
+                histogram_quantile(0.99,
+                  sum by (le, service_namespace, service_name, server_address) (
+                    rate(http_client_request_duration_bucket[5m])
+                  )
+                ) > 10
+                and on(service_namespace, service_name, server_address)
+                sum by (service_namespace, service_name, server_address) (
+                  rate(http_client_request_duration_count[5m])
+                ) > 0.01
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "[Downstream] {{ $labels.service_name }} → {{ $labels.server_address }} timeout — P99 = {{ $value | printf \"%.1f\" }}s"
+              description: >-
+                Service {{ $labels.service_name }} downstream
+                {{ $labels.server_address }}-a P99 > 10s. Çox güman
+                connection timeout baş verir. Downstream tamamilə
+                cavab vermir və ya network problemi var.
+
+          - alert: HTTPClientDownstreamErrorRate
+            expr: |
+              (
+                (
+                  sum by (service_namespace, service_name, server_address) (
+                    rate(http_client_request_duration_count{http_response_status_code=~"5.."}[5m])
+                  )
+                  /
+                  sum by (service_namespace, service_name, server_address) (
+                    rate(http_client_request_duration_count[5m])
+                  )
+                ) > 0.10
+                and on(service_namespace, service_name, server_address)
+                sum by (service_namespace, service_name, server_address) (
+                  rate(http_client_request_duration_count[5m])
+                ) > 0.05
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "[Downstream] {{ $labels.service_name }} → {{ $labels.server_address }} 5xx = {{ $value | humanizePercentage }}"
+              description: >-
+                Service {{ $labels.service_name }} downstream
+                {{ $labels.server_address }}-dan > 10% 5xx cavab alır.
+                Downstream çökür və ya overloaded-dır. Circuit breaker
+                aktiv deyilsə cascade failure riski var.
+
+
+      # ================================================================
+      #  HTTP 4XX CLIENT ERROR ALERTS
+      #
+      #  4xx error-lar server xətası deyil amma kod problemlərini
+      #  göstərə bilər: validation bug, auth misconfiguration,
+      #  breaking API change, wrong URL routing.
+      # ================================================================
+      - name: http-4xx-alerts
+        rules:
+          - alert: HTTPServerHigh4xxRate
+            expr: |
+              (
+                (
+                  sum by (service_namespace, service_name) (
+                    rate(http_server_request_duration_count{http_response_status_code=~"4.."}[5m])
+                  )
+                  /
+                  sum by (service_namespace, service_name) (
+                    rate(http_server_request_duration_count[5m])
+                  )
+                ) > 0.25
+                and on(service_namespace, service_name)
+                sum by (service_namespace, service_name) (
+                  rate(http_server_request_duration_count[5m])
+                ) > 0.5
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[4xx] {{ $labels.service_name }} 4xx rate = {{ $value | humanizePercentage }}"
+              description: >-
+                Service {{ $labels.service_name }} requestlərin > 25%-i
+                4xx ilə cavab verir. Validation bug, auth problemi,
+                breaking API change, və ya client misconfiguration.
+
+          - alert: HTTPServerHigh4xxEndpoint
+            expr: |
+              (
+                (
+                  sum by (service_namespace, service_name, http_route, http_response_status_code) (
+                    rate(http_server_request_duration_count{http_response_status_code=~"4.."}[5m])
+                  )
+                  /
+                  sum by (service_namespace, service_name, http_route, http_response_status_code) (
+                    rate(http_server_request_duration_count[5m])
+                  )
+                ) > 0.30
+                and on(service_namespace, service_name, http_route, http_response_status_code)
+                sum by (service_namespace, service_name, http_route, http_response_status_code) (
+                  rate(http_server_request_duration_count{http_response_status_code=~"4.."}[5m])
+                ) > 0.1
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[4xx] {{ $labels.service_name }} {{ $labels.http_route }} {{ $labels.http_response_status_code }} = {{ $value | humanizePercentage }}"
+              description: >-
+                Endpoint {{ $labels.http_route }} requestlərin > 30%-i
+                {{ $labels.http_response_status_code }} qaytarır. Status code-a
+                görə araşdırın — 401/403: auth, 404: routing/URL,
+                400/422: validation, 429: rate limit.

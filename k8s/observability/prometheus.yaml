@@ -93,6 +93,10 @@ spec:
                   name: prometheus-alerts-pod-extra
               - configMap:
                   name: prometheus-alerts-anomaly
+              - configMap:
+                  name: prometheus-alerts-saturation
+              - configMap:
+                  name: prometheus-alerts-utilization
         - name: data
           emptyDir: {}
 ---

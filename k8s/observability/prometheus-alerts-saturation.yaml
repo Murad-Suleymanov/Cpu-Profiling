@@ -1,0 +1,624 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-alerts-saturation
+  namespace: observability
+data:
+  saturation-alerts.yml: |
+    groups:
+      # ================================================================
+      #  NODE-LEVEL SATURATION
+      #
+      #  Node resursları limitə yaxınlaşanda alert verir.
+      #  prometheus-alerts.yaml-da kube_node_status_condition əsaslı
+      #  alert-lər var (DiskPressure, MemoryPressure, PIDPressure) —
+      #  onlar kubelet tetikleyir. Buradakılar isə metrik əsaslı
+      #  early warning-lərdir: kubelet condition true olmamışdan
+      #  ƏVVƏL saturation-u aşkarlayır.
+      # ================================================================
+      - name: node-saturation
+        rules:
+          - alert: NodeCPUSaturation
+            expr: |
+              (
+                (
+                  1 - avg by (node, cluster) (
+                    rate(node_cpu_seconds_total{mode="idle"}[5m])
+                  )
+                ) > 0.90
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Node {{ $labels.node }} CPU istifadəsi {{ $value | humanizePercentage }}-ə çatıb"
+              description: >-
+                Node {{ $labels.node }} CPU utilization 15+ dəqiqədir > 90%.
+                Scheduling headroom demək olar ki yoxdur — yeni pod-lar schedule
+                oluna bilməz, mövcud pod-lar throttle olunacaq.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: NodeCPUCriticalSaturation
+            expr: |
+              (
+                (
+                  1 - avg by (node, cluster) (
+                    rate(node_cpu_seconds_total{mode="idle"}[5m])
+                  )
+                ) > 0.95
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Node {{ $labels.node }} CPU istifadəsi kritik həddə — {{ $value | humanizePercentage }}"
+              description: >-
+                Node {{ $labels.node }} CPU utilization 10+ dəqiqədir > 95%.
+                Node faktiki olaraq saturation-dadır — bütün workload-lar
+                performans itkisi yaşayacaq. Node drain və ya scale-up lazımdır.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: NodeMemorySaturation
+            expr: |
+              (
+                (
+                  1 - (
+                    node_memory_MemAvailable_bytes
+                    / node_memory_MemTotal_bytes
+                  )
+                ) > 0.90
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Node {{ $labels.node }} memory istifadəsi {{ $value | humanizePercentage }}-ə çatıb"
+              description: >-
+                Node {{ $labels.node }} available memory 15+ dəqiqədir < 10%.
+                OOM killer aktivləşə bilər və pod-lar evict olunacaq.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: NodeMemoryCriticalSaturation
+            expr: |
+              (
+                (
+                  1 - (
+                    node_memory_MemAvailable_bytes
+                    / node_memory_MemTotal_bytes
+                  )
+                ) > 0.95
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Node {{ $labels.node }} memory kritik həddə — {{ $value | humanizePercentage }}"
+              description: >-
+                Node {{ $labels.node }} available memory 5+ dəqiqədir < 5%.
+                OOM killer istənilən anda pod-ları öldürə bilər.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: NodeDiskUsageSaturation
+            expr: |
+              (
+                (
+                  1 - (
+                    node_filesystem_avail_bytes{mountpoint="/", fstype!="tmpfs"}
+                    / node_filesystem_size_bytes{mountpoint="/", fstype!="tmpfs"}
+                  )
+                ) > 0.85
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Node {{ $labels.node }} root disk istifadəsi {{ $value | humanizePercentage }}-ə çatıb"
+              description: >-
+                Node {{ $labels.node }} root filesystem 15+ dəqiqədir > 85% doludur.
+                Container image-lər, log-lar, və ya emptyDir volume-lar diski
+                doldura bilər. DiskPressure condition yaranmamışdan əvvəl
+                təmizlik lazımdır.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: NodeFileDescriptorSaturation
+            expr: |
+              (
+                node_filefd_allocated / node_filefd_maximum > 0.80
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Node {{ $labels.node }} file descriptor istifadəsi {{ $value | humanizePercentage }}"
+              description: >-
+                Node {{ $labels.node }} allocated file descriptors system
+                limitinin {{ $value | humanizePercentage }}-nə çatıb. Connection leak,
+                çoxlu açıq fayl, və ya socket leak ola bilər. Limit keçildikdə
+                heç bir yeni connection/fayl açıla bilməz.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: NodeConntrackTableSaturation
+            expr: |
+              (
+                node_nf_conntrack_entries / node_nf_conntrack_entries_limit > 0.80
+              )
+              * on(cluster) group_left()
+              max by (cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Node {{ $labels.node }} conntrack table {{ $value | humanizePercentage }} doludur"
+              description: >-
+                Node {{ $labels.node }} netfilter conntrack table-ı limitinin
+                {{ $value | humanizePercentage }}-nə çatıb. Table dolduqda yeni
+                connection-lar drop olacaq. sysctl nf_conntrack_max artırılmalı
+                və ya connection leak araşdırılmalıdır.
+                Cluster: {{ $labels.cluster }}.
+
+      # ================================================================
+      #  CONTAINER-LEVEL SATURATION
+      #
+      #  prometheus-alerts.yaml-da ContainerHighCPU (>0.9 limit),
+      #  ContainerHighMemory (>0.9 limit) və ContainerCPUThrottled
+      #  (>0.5) var. Burada yalnız fərqli threshold və ya fərqli
+      #  metrik istifadə edən alert-lər var.
+      # ================================================================
+      - name: container-saturation
+        rules:
+          - alert: ContainerCPUThrottlingWarning
+            expr: |
+              (
+                (
+                  sum by (namespace, pod, container, cluster) (
+                    increase(container_cpu_cfs_throttled_periods_total[5m])
+                  )
+                  /
+                  sum by (namespace, pod, container, cluster) (
+                    increase(container_cpu_cfs_periods_total[5m])
+                  )
+                ) > 0.25
+                and
+                sum by (namespace, pod, container, cluster) (
+                  increase(container_cpu_cfs_periods_total[5m])
+                ) > 0
+              )
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 15m
+            labels:
+              severity: info
+            annotations:
+              summary: "[{{ $labels.team }}] {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} CPU throttle {{ $value | humanizePercentage }}"
+              description: >-
+                Container {{ $labels.container }} in pod {{ $labels.namespace }}/{{ $labels.pod }}
+                CFS period-larının {{ $value | humanizePercentage }}-i throttle olunur.
+                Hələ kritik deyil amma artım trendi varsa CPU limit nəzərdən keçirilməlidir.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: ContainerMemoryCriticalNearLimit
+            expr: |
+              (
+                (
+                  container_memory_working_set_bytes{container!="", image!=""}
+                  / on(namespace, pod, container)
+                  kube_pod_container_resource_limits{resource="memory"}
+                ) > 0.95
+                and
+                kube_pod_container_resource_limits{resource="memory"} > 0
+              )
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "[{{ $labels.team }}] {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} memory limit-ə çox yaxındır — {{ $value | humanizePercentage }}"
+              description: >-
+                Container {{ $labels.container }} in pod {{ $labels.namespace }}/{{ $labels.pod }}
+                memory working set limit-in {{ $value | humanizePercentage }}-nə çatıb.
+                OOMKill istənilən anda baş verə bilər.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: ContainerEphemeralStorageSaturation
+            expr: |
+              (
+                (
+                  container_fs_usage_bytes{container!="", image!=""}
+                  / container_fs_limit_bytes{container!="", image!=""}
+                ) > 0.85
+                and
+                container_fs_limit_bytes{container!="", image!=""} > 0
+              )
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[{{ $labels.team }}] {{ $labels.namespace }}/{{ $labels.pod }}/{{ $labels.container }} ephemeral storage {{ $value | humanizePercentage }} doludur"
+              description: >-
+                Container {{ $labels.container }} in pod {{ $labels.namespace }}/{{ $labels.pod }}
+                ephemeral storage limit-in {{ $value | humanizePercentage }}-ni istifadə edir.
+                Limit keçildikdə pod evict olunacaq. Log rotation, temp fayl
+                təmizliyi, və ya limit artırılması lazımdır.
+                Cluster: {{ $labels.cluster }}.
+
+      # ================================================================
+      #  NETWORK SATURATION
+      #
+      #  Network interface-lərdə packet drop və error — bandwidth
+      #  və ya buffer saturation göstəricisidir.
+      # ================================================================
+      - name: network-saturation
+        rules:
+          - alert: ContainerNetworkReceiveDrops
+            expr: |
+              (
+                sum by (namespace, pod, cluster) (
+                  rate(container_network_receive_packets_dropped_total[5m])
+                ) > 0
+              )
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[{{ $labels.team }}] {{ $labels.namespace }}/{{ $labels.pod }} network receive packet drop var"
+              description: >-
+                Pod {{ $labels.namespace }}/{{ $labels.pod }} 15+ dəqiqədir
+                receive tərəfdə packet drop yaşayır ({{ $value | printf "%.2f" }} drops/s).
+                Network buffer overflow, bandwidth saturation, və ya NIC
+                ring buffer dolması ola bilər.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: ContainerNetworkTransmitDrops
+            expr: |
+              (
+                sum by (namespace, pod, cluster) (
+                  rate(container_network_transmit_packets_dropped_total[5m])
+                ) > 0
+              )
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[{{ $labels.team }}] {{ $labels.namespace }}/{{ $labels.pod }} network transmit packet drop var"
+              description: >-
+                Pod {{ $labels.namespace }}/{{ $labels.pod }} 15+ dəqiqədir
+                transmit tərəfdə packet drop yaşayır ({{ $value | printf "%.2f" }} drops/s).
+                Egress bandwidth saturation, iptables rule overflow, və ya
+                conntrack table dolması ola bilər.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: ContainerNetworkReceiveErrors
+            expr: |
+              (
+                sum by (namespace, pod, cluster) (
+                  rate(container_network_receive_errors_total[5m])
+                ) > 0
+              )
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[{{ $labels.team }}] {{ $labels.namespace }}/{{ $labels.pod }} network receive error var"
+              description: >-
+                Pod {{ $labels.namespace }}/{{ $labels.pod }} 15+ dəqiqədir
+                receive tərəfdə network error yaşayır ({{ $value | printf "%.2f" }} errors/s).
+                NIC driver problemi, MTU mismatch, və ya checksum error
+                ola bilər.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: ContainerNetworkTransmitErrors
+            expr: |
+              (
+                sum by (namespace, pod, cluster) (
+                  rate(container_network_transmit_errors_total[5m])
+                ) > 0
+              )
+              * on(namespace, pod, cluster) group_left(team, squad, tribe, environment)
+              max by (namespace, pod, cluster, team, squad, tribe, environment) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[{{ $labels.team }}] {{ $labels.namespace }}/{{ $labels.pod }} network transmit error var"
+              description: >-
+                Pod {{ $labels.namespace }}/{{ $labels.pod }} 15+ dəqiqədir
+                transmit tərəfdə network error yaşayır ({{ $value | printf "%.2f" }} errors/s).
+                NIC driver problemi, bandwidth saturation, və ya network
+                configuration error ola bilər.
+                Cluster: {{ $labels.cluster }}.
+
+      # ================================================================
+      #  INGRESS SATURATION
+      #
+      #  Nginx Ingress Controller connection və request
+      #  queue saturation-unu aşkar edir.
+      # ================================================================
+      - name: ingress-saturation
+        rules:
+          - alert: IngressHighActiveConnections
+            expr: |
+              (
+                sum by (namespace, ingress, host, cluster) (
+                  nginx_ingress_controller_nginx_process_connections{state="active"}
+                ) > 10000
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Ingress {{ $labels.namespace }}/{{ $labels.ingress }} {{ $value | printf \"%.0f\" }} aktiv connection"
+              description: >-
+                Ingress {{ $labels.host }} ({{ $labels.namespace }}/{{ $labels.ingress }})
+                10000+ aktiv connection var. worker_connections limit-ə
+                yaxınlaşa bilər. Slow backend, keep-alive misconfiguration,
+                və ya traffic surge ola bilər.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: IngressHighWaitingConnections
+            expr: |
+              (
+                (
+                  sum by (namespace, ingress, host, cluster) (
+                    nginx_ingress_controller_nginx_process_connections{state="waiting"}
+                  )
+                  /
+                  sum by (namespace, ingress, host, cluster) (
+                    nginx_ingress_controller_nginx_process_connections
+                  )
+                ) > 0.80
+                and
+                sum by (namespace, ingress, host, cluster) (
+                  nginx_ingress_controller_nginx_process_connections
+                ) > 50
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Ingress {{ $labels.namespace }}/{{ $labels.ingress }} connection-ların {{ $value | humanizePercentage }}-i waiting-dədir"
+              description: >-
+                Ingress {{ $labels.host }} ({{ $labels.namespace }}/{{ $labels.ingress }})
+                connection-ların {{ $value | humanizePercentage }}-i waiting state-dədir.
+                Backend cavab verməkdə gecikir — upstream timeout, database
+                bottleneck, və ya thread pool exhaustion ola bilər.
+                Cluster: {{ $labels.cluster }}.
+
+          - alert: IngressUpstreamResponseSaturation
+            expr: |
+              (
+                histogram_quantile(0.99,
+                  sum by (le, namespace, ingress, host, cluster) (
+                    rate(nginx_ingress_controller_response_duration_seconds_bucket[5m])
+                  )
+                ) > 30
+                and
+                sum by (namespace, ingress, host, cluster) (
+                  rate(nginx_ingress_controller_requests[5m])
+                ) > 1
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 10m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Ingress {{ $labels.namespace }}/{{ $labels.ingress }} upstream P99 response time {{ $value | printf \"%.1f\" }}s"
+              description: >-
+                Ingress {{ $labels.host }} ({{ $labels.namespace }}/{{ $labels.ingress }})
+                upstream P99 response time 30s-i keçib. Backend tamamilə
+                saturated-dır — timeout-a çox yaxın. Requestlər queue-da
+                yığılır, cascading failure riski var.
+                Cluster: {{ $labels.cluster }}.
+
+      # ================================================================
+      #  HPA SATURATION (əlavə)
+      #
+      #  prometheus-alerts.yaml-da HPAMaxedOut (current == max) var.
+      #  Bu isə max-a YAXINLAŞMA early warning-dir.
+      # ================================================================
+      - name: hpa-saturation
+        rules:
+          - alert: HPANearMaxReplicas
+            expr: |
+              (
+                (
+                  kube_horizontalpodautoscaler_status_current_replicas
+                  / kube_horizontalpodautoscaler_spec_max_replicas
+                ) > 0.90
+                and
+                kube_horizontalpodautoscaler_status_current_replicas
+                < kube_horizontalpodautoscaler_spec_max_replicas
+                and
+                kube_horizontalpodautoscaler_spec_max_replicas > 1
+              )
+              * on(namespace, cluster) group_left()
+              max by (namespace, cluster) (kube_pod_labels{environment="prod", team="Fintech-Sre"})
+            for: 30m
+            labels:
+              severity: info
+            annotations:
+              summary: "HPA {{ $labels.namespace }}/{{ $labels.horizontalpodautoscaler }} max replica-ya yaxınlaşır — {{ $value | humanizePercentage }}"
+              description: >-
+                HPA {{ $labels.namespace }}/{{ $labels.horizontalpodautoscaler }}
+                current replicas max-ın {{ $value | humanizePercentage }}-nə çatıb.
+                Tezliklə maxed-out ola bilər. Proaktiv olaraq maxReplicas-ı
+                nəzərdən keçirin.
+                Cluster: {{ $labels.cluster }}.
+
+      # ================================================================
+      #  JVM SATURATION
+      #
+      #  JVM səviyyəsində saturation — resurslar limitdədir və iş
+      #  queue-da gözləyir. CPU saturation (runnable >> cores),
+      #  thread pool saturation, heap allocation pressure.
+      #  Mənbə: OTel Java auto-instrumentation
+      # ================================================================
+      - name: jvm-saturation
+        rules:
+          - alert: JVMRunnableThreadsCPUSaturation
+            expr: |
+              (
+                (
+                  sum by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_thread_count{jvm_thread_state="runnable"}
+                  )
+                  /
+                  max by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_cpu_count
+                  )
+                ) > 3
+                and on(service_namespace, k8s_pod_name, service_name)
+                max by (service_namespace, k8s_pod_name, service_name) (
+                  jvm_cpu_recent_utilization
+                ) > 0.60
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[JVM-Sat] {{ $labels.k8s_pod_name }} runnable/CPU = {{ $value | printf \"%.1f\" }}x"
+              description: >-
+                Pod {{ $labels.k8s_pod_name }} ({{ $labels.service_name }})
+                runnable thread sayı CPU core sayından {{ $value | printf "%.1f" }}x
+                çoxdur (CPU > 60%). Context switch overhead yüksəkdir —
+                thread-lər CPU üçün yarışır. Thread pool size-ı azaldın
+                və ya horizontal scale edin.
+
+          - alert: JVMActiveThreadsSaturation
+            expr: |
+              (
+                (
+                  sum by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_thread_count{jvm_thread_state=~"runnable|blocked"}
+                  )
+                  /
+                  sum by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_thread_count
+                  )
+                ) > 0.60
+                and
+                sum by (service_namespace, k8s_pod_name, service_name) (
+                  jvm_thread_count
+                ) > 100
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[JVM-Sat] {{ $labels.k8s_pod_name }} aktiv thread-lər {{ $value | humanizePercentage }}"
+              description: >-
+                Pod {{ $labels.k8s_pod_name }} ({{ $labels.service_name }})
+                thread-lərin > 60%-i 10+ dəqiqədir RUNNABLE və ya BLOCKED
+                state-dədir. İdle thread yoxdur — yeni gələn request-lər
+                queue-da gözləyəcək. Thread pool artırılmalı, bottleneck
+                tapılmalı (DB, downstream service, lock), və ya
+                horizontal scale lazımdır.
+
+          - alert: JVMHeapAllocationPressure
+            expr: |
+              (
+                (
+                  sum by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_memory_used{jvm_memory_type="heap"}
+                  )
+                  /
+                  sum by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_memory_limit{jvm_memory_type="heap"}
+                  )
+                ) > 0.75
+                and
+                (
+                  sum by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_memory_used{jvm_memory_type="heap"}
+                  )
+                  -
+                  sum by (service_namespace, k8s_pod_name, service_name) (
+                    jvm_memory_used{jvm_memory_type="heap"} offset 10m
+                  )
+                ) > 100 * 1024 * 1024
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "[JVM-Sat] {{ $labels.k8s_pod_name }} heap sürətlə dolur — allocation pressure"
+              description: >-
+                Pod {{ $labels.k8s_pod_name }} ({{ $labels.service_name }})
+                heap > 75% doludur və son 10 dəqiqədə > 100MB artıb.
+                GC allocation rate-ə çatmır — GC pause-lar sıxlaşacaq
+                və latency artacaq. Burst traffic, memory leak, və ya
+                cache explosion ola bilər.
+
+          - alert: JVMOldGenSaturated
+            expr: |
+              (
+                (
+                  jvm_memory_used{jvm_memory_type="heap", jvm_memory_pool_name=~".*Old Gen.*|.*Tenured.*"}
+                  /
+                  jvm_memory_limit{jvm_memory_type="heap", jvm_memory_pool_name=~".*Old Gen.*|.*Tenured.*"}
+                ) > 0.90
+                and
+                jvm_memory_limit{jvm_memory_type="heap", jvm_memory_pool_name=~".*Old Gen.*|.*Tenured.*"} > 0
+                and
+                (
+                  jvm_memory_used{jvm_memory_type="heap", jvm_memory_pool_name=~".*Old Gen.*|.*Tenured.*"}
+                  -
+                  jvm_memory_used{jvm_memory_type="heap", jvm_memory_pool_name=~".*Old Gen.*|.*Tenured.*"} offset 10m
+                ) > 0
+              )
+              * on(service_namespace) group_left()
+              label_replace(
+                max by (namespace) (kube_pod_labels{environment="prod"}),
+                "service_namespace", "$1", "namespace", "(.*)"
+              )
+            for: 10m
+            labels:
+              severity: critical
+            annotations:
+              summary: "[JVM-Sat] {{ $labels.k8s_pod_name }} Old Gen > 90% və hələ artır"
+              description: >-
+                Pod {{ $labels.k8s_pod_name }} ({{ $labels.service_name }})
+                Old Gen > 90% doludur və hələ azalmır. Full GC
+                (stop-the-world) çox tez-tez baş verir — hər Full GC
+                zamanı bütün request-lər donur. OOM yaxındır.
+                Heap dump götürüb leak araşdırın.
